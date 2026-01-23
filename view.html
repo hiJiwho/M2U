@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mail 2 U - Read</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" />
+    <link rel="stylesheet" href="./material3.css" />
+
+    <!-- React & MUI Dependencies -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/@mui/material@5.16.1/umd/material-ui.development.js"
+        crossorigin="anonymous"></script>
+    <script src="./db.js"></script>
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const {
+            createTheme, ThemeProvider, CssBaseline,
+            Box, Typography, Paper, Button, Avatar, Stack, Chip, Divider, IconButton, Card, CardContent, CardActions
+        } = MaterialUI;
+
+        const THEMES = [
+            { id: 'indigo', color: '#6750A4' }, // M3 Purple
+            { id: 'purple', color: '#9c27b0' },
+            { id: 'teal', color: '#00695f' },
+            { id: 'pink', color: '#b91d47' },
+            { id: 'orange', color: '#d84e09' },
+            { id: 'blueGrey', color: '#52667a' },
+        ];
+
+        function App() {
+            const [data, setData] = useState(null);
+
+            useEffect(() => {
+                const d = window.LetterDB.fromUrl();
+                if (d) {
+                    setData(d);
+                    window.LetterDB.save(d); // Auto-save for history
+                }
+            }, []);
+
+            if (!data) return (
+                <Box sx={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center' }}>
+                    <Typography>로딩 중...</Typography>
+                </Box>
+            );
+
+            const theme = createTheme({
+                typography: {
+                    fontFamily: `'Roboto', 'Pretendard', sans-serif`,
+                    h6: { fontWeight: 500 },
+                    button: { textTransform: 'none', fontWeight: 500 }
+                },
+                palette: {
+                    primary: { main: THEMES.find(t => t.id === data.theme)?.color || '#6750A4' },
+                    background: { default: '#FEF7FF', paper: '#F7F2FA' }, // Surface Container
+                    text: { primary: '#1D1B20', secondary: '#49454F' },
+                },
+                components: {
+                    MuiCard: {
+                        styleOverrides: {
+                            root: {
+                                borderRadius: 24,
+                                boxShadow: 'none',
+                                backgroundColor: '#F3EDF7', // Surface Container Low
+                                border: '1px solid #CAC4D0' // Outline variant
+                            }
+                        }
+                    },
+                    MuiButton: {
+                        styleOverrides: {
+                            root: { borderRadius: 20 },
+                            contained: { boxShadow: 'none', '&:hover': { boxShadow: '0 1px 2px rgba(0,0,0,0.3)' } },
+                            outlined: { borderColor: '#79747E', color: '#6750A4' }
+                        }
+                    },
+                    MuiChip: {
+                        styleOverrides: {
+                            root: { borderRadius: 8, backgroundColor: '#E8DEF8', color: '#1D192B' }
+                        }
+                    }
+                }
+            });
+
+            const openPopup = () => window.open(window.LetterDB.toUrl(data, 'popup.html'), '_blank', 'width=600,height=800');
+
+            return (
+                <ThemeProvider theme={theme}>
+                    <CssBaseline />
+                    <Box sx={{
+                        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        p: 3, bgcolor: 'background.default'
+                    }}>
+                        <Stack spacing={2} sx={{ width: '100%', maxWidth: 400 }}>
+                            <Card>
+                                <Box sx={{ bgcolor: 'primary.main', p: 4, pb: 6, color: 'onPrimary', position: 'relative', textAlign: 'center' }}>
+                                    <Avatar sx={{ width: 80, height: 80, margin: '0 auto', bgcolor: '#EADDFF', color: '#21005D', mb: 2 }}>
+                                        <span className="material-symbols-rounded" style={{ fontSize: 40 }}>mail</span>
+                                    </Avatar>
+                                    <Typography variant="headlineSmall" component="h2" sx={{ fontWeight: 400, fontSize: '1.5rem', color: '#FFFFFF' }}>편지가 도착했습니다!</Typography>
+                                    <Typography variant="body2" sx={{ opacity: 0.9, mt: 0.5, color: '#EADDFF' }}>보낸이: <span style={{ fontWeight: 600 }}>{data.senderName}</span></Typography>
+
+                                    <IconButton
+                                        sx={{ position: 'absolute', top: 8, right: 8, color: 'white' }}
+                                        onClick={() => window.location.href = 'index.html'}
+                                    >
+                                        <span className="material-symbols-rounded">close</span>
+                                    </IconButton>
+                                </Box>
+
+                                <CardContent sx={{ p: 3, pt: 0, mt: -3 }}>
+                                    <Paper elevation={0} sx={{ p: 3, bgcolor: '#FEF7FF', mb: 3, borderRadius: 4, border: '1px solid #E0E0E0' }}>
+                                        <Typography variant="labelMedium" color="textSecondary" align="left" sx={{ mb: 0.5, display: 'block' }}>제목</Typography>
+                                        <Typography variant="titleMedium" align="left" color="onSurface" sx={{ fontWeight: 500, fontSize: '1.2rem' }}>{data.subject || '제목 없음'}</Typography>
+                                    </Paper>
+
+                                    <Button
+                                        variant="contained" size="large" disableElevation
+                                        fullWidth sx={{ height: 56, mb: 3, fontSize: '1rem' }}
+                                        onClick={openPopup}
+                                        startIcon={<span className="material-symbols-rounded">open_in_new</span>}
+                                    >
+                                        편지 열기
+                                    </Button>
+
+                                    <Divider sx={{ my: 3 }}>
+                                        <Chip label="빠른 작업" size="small" />
+                                    </Divider>
+
+                                    <Stack direction="row" spacing={1} justifyContent="center" sx={{ mb: 1 }}>
+                                        {data.phone ? <Button variant="outlined" startIcon={<span className="material-symbols-rounded">call</span>} href={`tel:${data.phone}`} sx={{ flex: 1 }}>전화</Button> : null}
+                                        {data.email ? <Button variant="outlined" startIcon={<span className="material-symbols-rounded">email</span>} href={`mailto:${data.email}`} sx={{ flex: 1 }}>이메일</Button> : null}
+                                    </Stack>
+
+                                    {data.driveLink && (
+                                        <Button fullWidth color="secondary" href={data.driveLink.startsWith('http') ? data.driveLink : `https://${data.driveLink}`} target="_blank" startIcon={<span className="material-symbols-rounded">attach_file</span>} sx={{ mt: 1 }}>
+                                            첨부파일 열기
+                                        </Button>
+                                    )}
+                                </CardContent>
+                            </Card>
+
+                            <Button color="inherit" onClick={() => window.location.href = 'index.html'} sx={{ color: 'text.secondary' }}>
+                                받은 편지함으로 이동
+                            </Button>
+                        </Stack>
+                    </Box>
+                </ThemeProvider>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>

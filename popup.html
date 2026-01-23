@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Letter</title>
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap" />
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" />
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="./db.js"></script>
+    <link rel="stylesheet" href="./material3.css" />
+    <style>
+        :root {
+            --theme-color: #6750A4;
+            /* M3 Primary */
+            --surface-color: #FEF7FF;
+            --surface-container: #F3EDF7;
+            --on-surface: #1D1B20;
+            --on-surface-variant: #49454F;
+            --outline-variant: #CAC4D0;
+        }
+
+        /* Dark Mode */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --surface-color: #141218;
+                --surface-container: #211F26;
+                --on-surface: #E6E1E5;
+                --on-surface-variant: #CAC4D0;
+                --outline-variant: #49454F;
+            }
+        }
+
+        body {
+            background: var(--surface-container);
+            padding: 40px 20px;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            font-family: 'Roboto', sans-serif;
+            color: var(--on-surface);
+        }
+
+        .letter-paper {
+            width: 100%;
+            max-width: 700px;
+            background: var(--surface-color);
+            padding: 60px 80px;
+            box-shadow: 0 4px 8px 3px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.3);
+            /* Elevation 2 */
+            border-radius: 28px;
+            /* M3 Large Shape */
+            position: relative;
+            min-height: 85vh;
+            color: var(--on-surface);
+        }
+
+        .header {
+            font-size: 24px;
+            font-weight: 500;
+            /* M3 Headline Small */
+            color: var(--on-surface);
+            margin-bottom: 40px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--outline-variant);
+        }
+
+        .content {
+            font-size: 16px;
+            color: var(--on-surface-variant);
+            line-height: 1.6;
+            min-height: 400px;
+            white-space: pre-wrap;
+            font-family: 'Roboto', 'Pretendard', sans-serif;
+        }
+
+        .content h1,
+        .content h2,
+        .content h3 {
+            color: var(--theme-color);
+            margin-top: 24px;
+            font-weight: 500;
+        }
+
+        .footer {
+            text-align: right;
+            margin-top: 80px;
+            padding-top: 20px;
+            border-top: 1px solid var(--outline-variant);
+        }
+
+        .date {
+            font-size: 14px;
+            color: var(--on-surface-variant);
+            margin-bottom: 8px;
+        }
+
+        .sender {
+            font-size: 18px;
+            font-weight: 500;
+            color: var(--on-surface);
+        }
+
+        .theme-indicator {
+            position: fixed;
+            top: 24px;
+            right: 24px;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            background: var(--surface-color);
+            /* M3 Surface Container High/Low */
+            color: var(--on-surface-variant);
+            border: 1px solid var(--outline-variant);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+        }
+
+        .theme-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background-color: var(--theme-color);
+        }
+
+        @media screen and (max-width: 600px) {
+            .letter-paper {
+                padding: 40px 30px;
+                border-radius: 16px;
+            }
+        }
+
+        @media print {
+            body {
+                background: white;
+            }
+
+            .letter-paper {
+                box-shadow: none;
+                border: none;
+                padding: 0;
+            }
+
+            .theme-indicator {
+                display: none;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div id="root" style="width: 100%; display: flex; justify-content: center;">
+        <div class="letter-paper">
+            <div id="letter-header" class="header">로딩 중...</div>
+            <div id="letter-content" class="content"></div>
+            <div class="footer">
+                <div id="letter-date" class="date"></div>
+                <div id="letter-sender" class="sender"></div>
+            </div>
+        </div>
+        <div id="theme-badge" class="theme-indicator">
+            <div class="theme-dot"></div>
+            <span id="theme-text">테마</span>
+        </div>
+    </div>
+
+    <script>
+        const THEME_COLORS = {
+            indigo: '#6750A4', purple: '#9c27b0', teal: '#00695f', pink: '#b91d47', orange: '#d84e09', blueGrey: '#52667a'
+        };
+
+        const data = window.LetterDB.fromUrl();
+        if (data) {
+            // Apply Theme
+            const themeHex = THEME_COLORS[data.theme] || '#6750A4';
+            document.documentElement.style.setProperty('--theme-color', themeHex);
+            document.querySelector('.theme-dot').style.backgroundColor = themeHex;
+            document.getElementById('theme-text').innerText = (data.theme || 'M3 Purple').toUpperCase();
+
+            //Header
+            document.getElementById('letter-header').innerText = `받는이: ${data.receiverName} ${data.receiverRole}`;
+
+            //Content
+            if (window.marked) {
+                marked.setOptions({ breaks: true, gfm: true });
+                document.getElementById('letter-content').innerHTML = marked.parse(data.content || '');
+            } else {
+                document.getElementById('letter-content').innerText = data.content;
+            }
+
+            //Footer
+            document.getElementById('letter-date').innerText = data.date;
+            document.getElementById('letter-sender').innerText = `보낸이: ${data.senderName} ${data.senderRole}`;
+        }
+    </script>
+</body>
+
+</html>

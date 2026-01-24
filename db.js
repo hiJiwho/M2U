@@ -1,4 +1,4 @@
-const DB_NAME = 'OnlineLetterDB_V6_MULTI';
+const DB_NAME = 'OnlineLetterDB_Unified';
 const STORE_NAME = 'letters';
 
 const db = {
@@ -19,6 +19,7 @@ const db = {
         const tx = instance.transaction(STORE_NAME, 'readwrite');
         tx.objectStore(STORE_NAME).put({
             ...letter,
+            id: String(letter.id), // Normalize ID to string
             savedAt: new Date().toISOString()
         });
         return new Promise((r) => tx.oncomplete = () => r(true));
@@ -32,18 +33,70 @@ const db = {
         });
     },
 
+    get: async (id) => {
+        if (!id) return null;
+        const instance = await db.open();
+        return new Promise((resolve) => {
+            const store = instance.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME);
+            const req = store.get(String(id)); // Try string first
+            req.onsuccess = () => {
+                if (req.result) resolve(req.result);
+                else {
+                    const req2 = store.get(Number(id)); // Then try number
+                    req2.onsuccess = () => resolve(req2.result);
+                    req2.onerror = () => resolve(null);
+                }
+            };
+            req.onerror = () => resolve(null);
+        });
+    },
+
     delete: async (id) => {
+        if (!id) return false;
         const instance = await db.open();
         const tx = instance.transaction(STORE_NAME, 'readwrite');
-        tx.objectStore(STORE_NAME).delete(id);
+        const store = tx.objectStore(STORE_NAME);
+        store.delete(String(id));
+        if (!isNaN(Number(id))) {
+            store.delete(Number(id));
+        }
         return new Promise((r) => tx.oncomplete = () => r(true));
+    },
+
+    exists: async (id) => {
+        if (!id) return false;
+        const instance = await db.open();
+        return new Promise((resolve) => {
+            const store = instance.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME);
+            const req = store.count(String(id));
+            req.onsuccess = () => {
+                if (req.result > 0) resolve(true);
+                else {
+                    const req2 = store.count(Number(id));
+                    req2.onsuccess = () => resolve(req2.result > 0);
+                    req2.onerror = () => resolve(false);
+                }
+            };
+            req.onerror = () => resolve(false);
+        });
+    },
+
+    generateRandomId: async () => {
+        const instance = await db.open();
+        let id;
+        let exists = true;
+        while (exists) {
+            id = Math.floor(100000 + Math.random() * 900000).toString(); // 6 digits
+            exists = await db.exists(id);
+        }
+        return id;
     },
 
     // URL 파라미터에서 데이터 추출
     fromUrl: () => {
         const params = new URLSearchParams(window.location.search);
         const data = {};
-        const fields = ['id', 'subject', 'receiverName', 'receiverRole', 'senderName', 'senderRole', 'content', 'date', 'phone', 'email', 'driveLink', 'theme', 'mode'];
+        const fields = ['id', 'subject', 'receiverName', 'receiverRole', 'senderName', 'senderRole', 'content', 'date', 'phone', 'email', 'driveLink', 'theme', 'mode', 'messages', 'mailbox', 'passwordHash'];
         fields.forEach(f => {
             data[f] = params.get(f) || '';
         });
@@ -76,6 +129,15 @@ const db = {
             return 'https://' + url;
         }
         return url;
+    },
+
+    // Password Hash (SHA-256)
+    hashPassword: async (text) => {
+        const msgBuffer = new TextEncoder().encode(text);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+        return hashHex;
     }
 };
 

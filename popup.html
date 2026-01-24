@@ -14,23 +14,33 @@
 
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="./db.js"></script>
+    <script src="./utils.js"></script>
     <link rel="stylesheet" href="./material3.css" />
     <style>
         :root {
-            --theme-color: #6750A4;
-            /* M3 Primary */
-            --surface-color: #FEF7FF;
-            --surface-container: #F3EDF7;
-            --on-surface: #1D1B20;
-            --on-surface-variant: #49454F;
-            --outline-variant: #CAC4D0;
+            --G_white: #FFFFFF;
+            --G_black: #000000;
+            --G_gray_dark: #1D1B20;
+            --G_gray_medium: #49454F;
+            --G_gray_light: #E7E0EB;
+            --G_divider: rgba(0, 0, 0, 0.12);
+
+            /* Dynamic Theme Variables */
+            --T_primary: #6750A4;
+            --T_background: #FEF7FF;
+            --T_surface: #FFFFFF;
+            --T_surfaceContainer: rgba(103, 80, 164, 0.15);
+
+            --L_primary: var(--T_primary);
+            --L_container: var(--T_surfaceContainer);
         }
 
-        /* Dark Mode */
+        /* Dark Mode Support */
         @media (prefers-color-scheme: dark) {
             :root {
-                --surface-color: #141218;
-                --surface-container: #211F26;
+                --T_surface: #141218;
+                --T_background: #00000010;
+                /* Slightly darker tint */
                 --on-surface: #E6E1E5;
                 --on-surface-variant: #CAC4D0;
                 --outline-variant: #49454F;
@@ -38,27 +48,26 @@
         }
 
         body {
-            background: var(--surface-container);
+            background-color: var(--T_background);
             padding: 40px 20px;
             margin: 0;
             display: flex;
             justify-content: center;
             font-family: 'Roboto', sans-serif;
-            color: var(--on-surface);
+            color: var(--G_gray_dark);
+            transition: background-color 0.3s ease;
         }
 
         .letter-paper {
             width: 100%;
             max-width: 700px;
-            background: var(--surface-color);
+            background: var(--T_surfaceContainer);
             padding: 60px 80px;
             box-shadow: 0 4px 8px 3px rgba(0, 0, 0, 0.15), 0 1px 3px rgba(0, 0, 0, 0.3);
-            /* Elevation 2 */
             border-radius: 28px;
-            /* M3 Large Shape */
             position: relative;
             min-height: 85vh;
-            color: var(--on-surface);
+            color: #000000;
         }
 
         .header {
@@ -115,7 +124,7 @@
             border-radius: 8px;
             font-size: 14px;
             font-weight: 500;
-            background: var(--surface-color);
+            background: var(--T_surface);
             /* M3 Surface Container High/Low */
             color: var(--on-surface-variant);
             border: 1px solid var(--outline-variant);
@@ -129,7 +138,7 @@
             width: 12px;
             height: 12px;
             border-radius: 50%;
-            background-color: var(--theme-color);
+            background-color: var(--L_primary);
         }
 
         @media screen and (max-width: 600px) {
@@ -175,32 +184,161 @@
 
     <script>
         const THEME_COLORS = {
-            indigo: '#6750A4', purple: '#9c27b0', teal: '#00695f', pink: '#b91d47', orange: '#d84e09', blueGrey: '#52667a'
+            m3_purple: '#6750A4',
+            mint: '#008272',
+            berry: '#0067C0', // Ocean Blue
+            candy: '#E3008C',
+            forest: '#004E4C',
+            pumpkin: '#D83B01',
+            zinc: '#505050'
         };
 
-        const data = window.LetterDB.fromUrl();
-        if (data) {
-            // Apply Theme
-            const themeHex = THEME_COLORS[data.theme] || '#6750A4';
-            document.documentElement.style.setProperty('--theme-color', themeHex);
-            document.querySelector('.theme-dot').style.backgroundColor = themeHex;
-            document.getElementById('theme-text').innerText = (data.theme || 'M3 Purple').toUpperCase();
+        const THEME_NAMES = {
+            m3_purple: 'M3 퍼플',
+            mint: '민트 틸',
+            berry: '오션 블루',
+            candy: '캔디 핑크',
+            forest: '포레스트 그린',
+            pumpkin: '펌킨 오렌지',
+            zinc: '징크 그레이'
+        };
 
-            //Header
-            document.getElementById('letter-header').innerText = `받는이: ${data.receiverName} ${data.receiverRole}`;
+        (async function () {
+            const params = new URLSearchParams(window.location.search);
+            const hasParams = params.has('subject') || params.has('content');
 
-            //Content
-            if (window.marked) {
-                marked.setOptions({ breaks: true, gfm: true });
-                document.getElementById('letter-content').innerHTML = marked.parse(data.content || '');
+            let data = null;
+
+            if (hasParams) {
+                // 1. From URL
+                data = window.LetterDB.fromUrl();
+                if (data) {
+                    // 2. Auto-save (if not exists)
+                    const exists = await window.LetterDB.exists(data.id);
+                    if (!exists) {
+                        // New Inbox Item
+                        await window.LetterDB.save({ ...data, mailbox: ['inbox'], savedAt: new Date().toISOString() });
+                    } else {
+                        // Exists (Self-Send Case): Add 'inbox' tag if needed
+                        const existing = await window.LetterDB.get(data.id);
+                        if (existing) {
+                            let mbox = existing.mailbox;
+                            if (!Array.isArray(mbox)) mbox = [mbox]; // Normalize
+                            if (!mbox.includes('inbox')) {
+                                mbox.push('inbox');
+                                await window.LetterDB.save({ ...existing, mailbox: mbox });
+                            }
+                        }
+                    }
+                }
+
+                // 3. Session Save
+                sessionStorage.setItem('current_popup_letter', JSON.stringify(data));
+
+                // 4. URL Clean
+                window.history.replaceState({}, document.title, window.location.pathname);
             } else {
-                document.getElementById('letter-content').innerText = data.content;
+                // 1. From Session
+                const sessionStr = sessionStorage.getItem('current_popup_letter');
+                if (sessionStr) {
+                    data = JSON.parse(sessionStr);
+                } else {
+                    // Check Opener? (Optional)
+                    try {
+                        if (window.opener && window.opener.sessionStorage) {
+                            const openerSession = window.opener.sessionStorage.getItem('current_letter');
+                            if (openerSession) data = JSON.parse(openerSession);
+                        }
+                    } catch (e) { }
+
+                    if (!data) {
+                        alert('잘못된 접근입니다.');
+                        window.close();
+                        return;
+                    }
+                }
             }
 
-            //Footer
-            document.getElementById('letter-date').innerText = data.date;
-            document.getElementById('letter-sender').innerText = `보낸이: ${data.senderName} ${data.senderRole}`;
-        }
+            if (data) {
+                // Apply Theme using CSS Variables
+                const themeHex = THEME_COLORS[data.theme] || '#6750A4';
+                const root = document.documentElement;
+                root.style.setProperty('--T_primary', themeHex);
+                root.style.setProperty('--T_background', themeHex + '08');
+                root.style.setProperty('--T_surfaceContainer', themeHex + '15');
+
+                // For direct accessibility if needed
+                root.style.setProperty('--theme-color', themeHex);
+
+                document.querySelector('.theme-dot').style.backgroundColor = themeHex;
+                document.getElementById('theme-text').innerText = THEME_NAMES[data.theme] || 'M3 퍼플';
+
+                //Header
+                document.getElementById('letter-header').innerText = `받는이: ${data.receiverName} ${data.receiverRole}`;
+
+                //Content or Rolling Paper
+                const contentEl = document.getElementById('letter-content');
+
+                if (data.messages) {
+                    // Rolling Paper Mode
+                    try {
+                        const messages = JSON.parse(data.messages);
+
+                        // Async process all messages for variables
+                        Promise.all(messages.map(async msg => {
+                            // Use VariableUtils if available, else fallback
+                            const parsed = window.VariableUtils
+                                ? await window.VariableUtils.parse(msg.content, { ...data, ...msg })
+                                : msg.content;
+                            return { ...msg, content: parsed };
+                        })).then(processedMessages => {
+                            let html = '<div style="display: flex; flex-direction: column; gap: 16px;">';
+                            processedMessages.forEach(msg => {
+                                html += `
+                                    <div style="background: rgba(255,255,255,0.6); padding: 16px; border-radius: 16px; border: 1px solid rgba(0,0,0,0.05); display: flex; flex-direction: column; gap: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                                        <div style="display: flex; align-items: baseline; gap: 8px; border-bottom: 1px solid rgba(0,0,0,0.05); padding-bottom: 8px;">
+                                            <span style="font-weight: 600; font-size: 1.1em; color: var(--theme-color);">${msg.senderName}</span>
+                                            <span style="font-size: 0.85em; opacity: 0.7; color: #444;">${msg.senderRole}</span>
+                                        </div>
+                                        <div style="white-space: pre-wrap; line-height: 1.6; color: #333; font-size: 1.05em;">${msg.content}</div>
+                                    </div>
+                                `;
+                            });
+                            html += '</div>';
+                            contentEl.innerHTML = html;
+                        });
+
+                    } catch (e) {
+                        contentEl.innerText = "메시지를 불러오는 중 오류가 발생했습니다.";
+                        console.error(e);
+                    }
+                } else {
+                    // Normal Mode
+                    const rawContent = data.content || '';
+                    const promise = window.VariableUtils
+                        ? window.VariableUtils.parse(rawContent, data)
+                        : Promise.resolve(rawContent);
+
+                    promise.then(parsed => {
+                        if (window.marked) {
+                            marked.setOptions({ breaks: true, gfm: true });
+                            contentEl.innerHTML = marked.parse(parsed);
+                        } else {
+                            contentEl.innerText = parsed;
+                        }
+                    });
+                }
+
+                //Footer
+                document.getElementById('letter-date').innerText = data.date;
+
+                if (!data.messages) {
+                    document.getElementById('letter-sender').innerText = `보낸이: ${data.senderName} ${data.senderRole}`;
+                } else {
+                    document.getElementById('letter-sender').innerText = `롤링페이퍼 (${JSON.parse(data.messages).length}명)`;
+                }
+            }
+        })();
     </script>
 </body>
 

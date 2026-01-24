@@ -21,6 +21,8 @@
     <script src="https://unpkg.com/@mui/material@5.16.1/umd/material-ui.development.js"
         crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+    <script src="https://cdn.quilljs.com/1.3.6/quill.js"></script>
+    <link href="https://cdn.quilljs.com/1.3.6/quill.snow.css" rel="stylesheet">
     <script src="./db.js"></script>
 </head>
 
@@ -28,31 +30,151 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useRef } = React;
+        const { useState, useRef, useEffect } = React;
+        const MaterialUI = window.MaterialUI || window.Mui;
         const {
             createTheme, ThemeProvider, CssBaseline,
             Container, Box, Paper, Typography, TextField, Button,
             Stack, Chip, AppBar, Toolbar, IconButton, Fab,
-            Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions
+            Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
+            ToggleButton, ToggleButtonGroup, Tab, Tabs, Divider, List, ListItem, ListItemText,
+            Menu, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
+            Select, FormControl, InputLabel, Snackbar
         } = MaterialUI;
 
         const THEMES = [
-            { id: 'indigo', color: '#6750A4', name: 'M3 Purple' }, // Primary M3 Color
-            { id: 'purple', color: '#9c27b0', name: 'Purple' },
-            { id: 'teal', color: '#00695f', name: 'Teal' }, // Darker Teal for M3 contrast
-            { id: 'pink', color: '#b91d47', name: 'Pink' },
-            { id: 'orange', color: '#d84e09', name: 'Orange' },
-            { id: 'blueGrey', color: '#52667a', name: 'Slate' },
+            { id: 'm3_purple', color: '#6750A4', name: 'M3 퍼플' },
+            { id: 'mint', color: '#008272', name: '민트 틸' },
+            { id: 'berry', color: '#0067C0', name: '오션 블루' },
+            { id: 'candy', color: '#E3008C', name: '캔디 핑크' },
+            { id: 'forest', color: '#004E4C', name: '포레스트 그린' },
+            { id: 'pumpkin', color: '#D83B01', name: '펌킨 오렌지' },
+            { id: 'zinc', color: '#505050', name: '징크 그레이' },
         ];
 
         function App() {
             const [form, setForm] = useState({
                 subject: '', receiverName: '', receiverRole: '',
                 senderName: '', senderRole: '', content: '',
-                phone: '', email: '', driveLink: '', theme: 'indigo'
+                phone: '', email: '', driveLink: '', theme: 'm3_purple',
+                contentType: 'text',
+                password: '', // Raw input (not saved)
+                // New Fields
+                receivers: '', // For Multi-Send
+                messages: [] // For Rolling Paper: [{ senderName, senderRole, content }]
             });
+            const [snackbar, setSnackbar] = useState({ open: false, message: '' });
+            const [mode, setMode] = useState('general'); // 'general' | 'multi' | 'rolling'
             const [resultUrl, setResultUrl] = useState('');
+            const [originUrl, setOriginUrl] = useState('');
+            const [multiResults, setMultiResults] = useState([]); // [{ name, url }]
+
+            // Autocomplete State
+            const [anchorEl, setAnchorEl] = useState(null);
+            const [cursorPos, setCursorPos] = useState(0);
+
+            // Rolling Paper Input State
+            const [rollingInput, setRollingInput] = useState({ senderName: '', senderRole: '', content: '' });
+
+            // Quill Ref
+            const quillRef = useRef();
+            const editorRef = useRef();
+
+            // Profile State
+            const [profiles, setProfiles] = useState([]);
+            const [selectedProfile, setSelectedProfile] = useState('');
+
             const qrRef = useRef();
+
+            // Initialize Quill
+            useEffect(() => {
+                if (form.contentType === 'html' && !editorRef.current) {
+                    // Small delay to ensure DOM render
+                    setTimeout(() => {
+                        if (document.getElementById('editor')) {
+                            editorRef.current = new Quill('#editor', {
+                                theme: 'snow',
+                                modules: {
+                                    toolbar: [
+                                        [{ 'header': [1, 2, false] }],
+                                        ['bold', 'italic', 'underline', 'strike'],
+                                        [{ 'color': [] }, { 'background': [] }],
+                                        [{ 'list': 'ordered' }, { 'list': 'bullet' }],
+                                        ['link', 'image', 'video'],
+                                        ['clean']
+                                    ]
+                                }
+                            });
+                            editorRef.current.on('text-change', (delta, oldDelta, source) => {
+                                setForm(prev => ({ ...prev, content: editorRef.current.root.innerHTML }));
+
+                                // Autocomplete trigger for Quill
+                                if (source === 'user') {
+                                    const selection = editorRef.current.getSelection();
+                                    if (selection) {
+                                        const index = selection.index;
+                                        const text = editorRef.current.getText(index - 2, 2);
+                                        if (text === '/{') {
+                                            setAnchorEl(document.getElementById('editor'));
+                                            setCursorPos(index);
+                                        }
+                                    }
+                                }
+                            });
+                            // Set initial content if exists
+                            if (form.content) editorRef.current.root.innerHTML = form.content;
+                        }
+                    }, 100);
+                }
+            }, [form.contentType]);
+
+            // 1. Load Draft OR Edit
+            useEffect(() => {
+                const init = async () => {
+                    // Load Profile list
+                    const storedProfiles = localStorage.getItem('mail2u_profiles');
+                    if (storedProfiles) setProfiles(JSON.parse(storedProfiles));
+
+                    // Load Data
+                    const params = new URLSearchParams(window.location.search);
+                    const draftId = params.get('draftId');
+
+                    if (draftId) {
+                        const d = await window.LetterDB.get(draftId);
+                        if (d) {
+                            setForm(d);
+                            if (d.receivers) setMode('multi');
+                            if (d.messages && d.messages.length > 0) setMode('rolling');
+                            if (d.contentType === 'html' && editorRef.current) {
+                                editorRef.current.root.innerHTML = d.content;
+                            }
+                        }
+                    } else {
+                        // New Letter: Generate Random ID immediately
+                        const newId = await window.LetterDB.generateRandomId();
+                        setForm(prev => ({ ...prev, id: newId }));
+
+                        const newUrl = new URL(window.location);
+                        newUrl.searchParams.set('draftId', newId);
+                        window.history.replaceState({}, '', newUrl);
+                    }
+                };
+                init();
+            }, []);
+
+            // Auto Save to DB on Change (Instant Draft)
+            useEffect(() => {
+                if (form.id && (form.subject || form.content)) {
+                    // Save draft silently
+                    const draftData = {
+                        ...form,
+                        mailbox: 'draft',
+                        updatedAt: new Date().toISOString()
+                        // Note: Password remains raw in draft for easy editing
+                    };
+                    window.LetterDB.save(draftData).catch(console.error);
+                }
+            }, [form]);
 
             // Dynamic M3 Theme
             const theme = createTheme({
@@ -63,21 +185,40 @@
                 },
                 palette: {
                     primary: { main: THEMES.find(t => t.id === form.theme)?.color || '#6750A4' },
-                    background: { default: '#FEF7FF', paper: '#F7F2FA' }, // Surface Container
+                    secondary: {
+                        main: (THEMES.find(t => t.id === form.theme)?.color || '#6750A4') + 'AA',
+                        container: (THEMES.find(t => t.id === form.theme)?.color || '#6750A4') + '20',
+                        onContainer: (THEMES.find(t => t.id === form.theme)?.color || '#6750A4')
+                    },
+                    background: { default: (THEMES.find(t => t.id === form.theme)?.color || '#6750A4') + '08', paper: '#FFFFFF' },
+                    surfaceVariant: { main: (THEMES.find(t => t.id === form.theme)?.color || '#6750A4') + '15', onMain: '#49454F' },
                     text: { primary: '#1D1B20', secondary: '#49454F' },
                 },
                 components: {
+                    MuiCssBaseline: {
+                        styleOverrides: `
+                            :root {
+                                --T_primary: ${THEMES.find(t => t.id === form.theme)?.color || '#6750A4'};
+                                --T_background: ${(THEMES.find(t => t.id === form.theme)?.color || '#6750A4')}08;
+                                --T_surface: #FFFFFF;
+                                --T_surfaceContainer: ${(THEMES.find(t => t.id === form.theme)?.color || '#6750A4')}15;
+
+                                --L_primary: var(--T_primary);
+                                --L_container: var(--T_surfaceContainer);
+                            }
+                            body { background-color: var(--T_background) !important; }
+                        `
+                    },
                     MuiTextField: {
-                        defaultProps: { variant: 'filled', fullWidth: true, size: 'small' },
+                        defaultProps: { variant: 'outlined', fullWidth: true, size: 'small' },
                         styleOverrides: {
                             root: {
-                                '& .MuiFilledInput-root': {
-                                    borderTopLeftRadius: 4, borderTopRightRadius: 4,
-                                    backgroundColor: '#F3EDF7',
-                                    '&:hover': { backgroundColor: '#EADDFF' },
-                                    '&.Mui-focused': { backgroundColor: '#EADDFF' },
-                                    '&:before': { borderBottom: '1px solid #49454F' },
-                                    '&:after': { borderBottomWidth: 2 }
+                                '& .MuiOutlinedInput-root': {
+                                    borderRadius: 12,
+                                    backgroundColor: 'var(--T_surfaceContainer)',
+                                    '& fieldset': { borderColor: 'transparent' },
+                                    '&:hover fieldset': { borderColor: 'var(--T_primary)', opacity: 0.5 },
+                                    '&.Mui-focused fieldset': { borderColor: 'var(--T_primary)', borderWidth: 2 }
                                 }
                             }
                         }
@@ -88,72 +229,344 @@
                     },
                     MuiButton: {
                         styleOverrides: {
-                            root: { borderRadius: 20 },
-                            contained: { boxShadow: 'none', '&:hover': { boxShadow: '0 1px 2px rgba(0,0,0,0.3)' } }
+                            root: { borderRadius: 20, padding: '10px 24px', textTransform: 'none' },
+                            contained: { boxShadow: 'none' }
+                        }
+                    },
+                    MuiFab: {
+                        styleOverrides: {
+                            root: {
+                                borderRadius: 16,
+                                '&.MuiFab-extended': { borderRadius: 28, padding: '0 24px' }
+                            }
                         }
                     },
                     MuiDialog: {
                         styleOverrides: {
-                            paper: { borderRadius: 28, padding: '16px' }
+                            paper: { borderRadius: 28, padding: '0', overflow: 'hidden', boxShadow: '0 24px 48px rgba(0,0,0,0.2)' }
                         }
                     },
                     MuiChip: {
                         styleOverrides: {
                             root: { borderRadius: 8, fontWeight: 500 },
                             filled: { border: 'none' },
-                            outlined: { borderColor: '#79747E' }
+                            outlined: { borderColor: 'var(--md-sys-color-outline)' }
                         }
                     },
                     MuiAppBar: {
                         styleOverrides: {
-                            root: { backgroundColor: '#FEF7FF', color: '#1D1B20', boxShadow: 'none' }
+                            root: { backgroundColor: 'var(--md-sys-color-surface)', color: 'var(--md-sys-color-on-surface)', boxShadow: 'none' }
                         }
                     }
                 }
             });
 
-            const handleChange = (e) => setForm({ ...form, [e.target.name]: e.target.value });
+            const handleChange = (e) => {
+                const { name, value } = e.target;
+                setForm(prev => ({ ...prev, [name]: value }));
+
+                // Autocomplete Trigger for 'content' field
+                if (name === 'content') {
+                    const lastTwo = value.slice(e.target.selectionStart - 2, e.target.selectionStart);
+                    if (lastTwo === '/{') {
+                        setAnchorEl(e.target); // It won't be exact caret position but it works for context
+                        setCursorPos(e.target.selectionStart);
+                    }
+                }
+            };
+
+            const handleVarSelect = (varName) => {
+                const varText = varName.endsWith(':') ? varName : varName + '}';
+                if (form.contentType === 'html' && editorRef.current) {
+                    editorRef.current.insertText(cursorPos, varText);
+                    editorRef.current.setSelection(cursorPos + varText.length);
+                } else {
+                    const text = form.content;
+                    const newContent = text.slice(0, cursorPos) + varText + text.slice(cursorPos);
+                    setForm(prev => ({ ...prev, content: newContent }));
+                    // Refocus (simple workaround)
+                    setTimeout(() => {
+                        const ta = document.querySelector('textarea[name="content"]');
+                        if (ta) ta.focus();
+                    }, 0);
+                }
+                setAnchorEl(null);
+            };
+
+            const addRollingMessage = () => {
+                if (!rollingInput.senderName || !rollingInput.content) return alert('이름과 내용을 입력해주세요.');
+                setForm(prev => ({
+                    ...prev,
+                    messages: [...prev.messages, { ...rollingInput, id: Date.now() }]
+                }));
+                setRollingInput({ senderName: '', senderRole: '', content: '' });
+            };
+
+            const removeRollingMessage = (id) => {
+                setForm(prev => ({ ...prev, messages: prev.messages.filter(m => m.id !== id) }));
+            };
+
+            const handleProfileChange = (e) => {
+                const pid = e.target.value;
+                setSelectedProfile(pid);
+                const p = profiles.find(x => x.id === pid);
+                if (p) {
+                    setForm(prev => ({
+                        ...prev,
+                        senderName: p.senderName,
+                        senderRole: p.senderRole,
+                        phone: p.phone,
+                        email: p.email,
+                        theme: p.defaultTheme || 'm3_purple'
+                    }));
+                }
+            };
+
+
 
             const handleSubmit = async () => {
                 if (!form.subject) return alert('제목을 입력해주세요.');
 
-                const id = await window.LetterDB.generateID(form);
-                const finalData = { ...form, id, date: new Date().toLocaleDateString() };
-                await window.LetterDB.save(finalData);
+                let finalUrl = '';
+                let finalMultiResults = [];
 
-                const url = window.LetterDB.toUrl(finalData, 'view.html');
-                setResultUrl(url);
+                if (mode === 'general') {
+                    if (!form.receiverName || !form.content) return alert('받는사람과 내용을 입력해주세요.');
+
+                    const id = form.id || await window.LetterDB.generateID(form);
+                    let finalForm = { ...form };
+                    if (form.password) {
+                        if (!/^\d{4,6}$/.test(form.password)) return alert('비밀번호는 4~6자리 숫자여야 합니다.');
+                        const hash = await window.LetterDB.hashPassword(form.password);
+                        finalForm.passwordHash = hash;
+                        delete finalForm.password;
+                    }
+
+                    // Auto-Add 'inbox' tag if Sender name equals Receiver name
+                    const mailbox = ['sent'];
+                    if (finalForm.senderName && finalForm.receiverName && finalForm.senderName.trim() === finalForm.receiverName.trim()) {
+                        mailbox.push('inbox');
+                    }
+
+                    const finalData = { ...finalForm, id, mailbox, date: new Date().toLocaleDateString() };
+                    await window.LetterDB.save(finalData);
+                    finalUrl = window.LetterDB.toUrl(finalData, 'view.html');
+
+                } else if (mode === 'multi') {
+                    if (!form.receivers) return alert('받는사람 목록을 입력해주세요.');
+                    if (!form.content) return alert('내용을 입력해주세요.');
+
+                    const names = form.receivers.split(',').map(n => n.trim()).filter(n => n);
+                    if (names.length === 0) return alert('유효한 받는사람 이름이 없습니다.');
+
+                    const results = [];
+                    for (const name of names) {
+                        const specificForm = { ...form, receiverName: name };
+                        const id = await window.LetterDB.generateID(specificForm); // specific ID per receiver
+                        const finalData = { ...specificForm, id, mailbox: ['sent'], date: new Date().toLocaleDateString() };
+                        await window.LetterDB.save(finalData);
+                        const url = window.LetterDB.toUrl(finalData, 'view.html');
+                        results.push({ name, url });
+                    }
+                    setMultiResults(results);
+                    // No Main QR for Multi
+                    setResultUrl('');
+                    // No Auto Shorten
+
+                } else if (mode === 'rolling') {
+                    if (!form.receiverName) return alert('받는사람을 입력해주세요.');
+                    if (form.messages.length === 0) return alert('메시지를 하나 이상 추가해주세요.');
+
+                    const rollingData = {
+                        ...form,
+                        content: `${form.messages.length}개의 메시지가 담긴 롤링페이퍼입니다.`, // Fallback content
+                        messages: JSON.stringify(form.messages)
+                    };
+
+                    const id = await window.LetterDB.generateID(rollingData);
+                    const finalData = { ...rollingData, id, mailbox: ['sent'], date: new Date().toLocaleDateString() };
+                    await window.LetterDB.save(finalData);
+                    finalUrl = window.LetterDB.toUrl(finalData, 'view.html');
+                }
+
+                if (finalUrl) {
+                    setOriginUrl(finalUrl);
+                    setResultUrl(finalUrl);
+                    setMultiResults(finalMultiResults);
+                    if (mode !== 'multi') generateQR(finalUrl);
+
+                    // Auto Shorten URL (Skip for Multi)
+                    if (mode !== 'multi') shortenUrl(finalUrl, finalMultiResults);
+
+                    // Clear Draft if exists in localStorage (Legacy/Backup)
+                    if (form.id && form.mailbox === 'draft') {
+                        // We don't delete from IndexedDB here because save() already updated it to 'sent'
+                        localStorage.removeItem('mail2u_draft');
+                    }
+                }
+            };
+
+            const shortenUrl = async (url, multiRes) => {
+                if (!url) return;
+                try {
+                    // Shorten Main URL
+                    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
+                    if (res.ok) {
+                        const short = await res.text();
+                        setResultUrl(short);
+                    }
+
+                    // Shorten Multi Results (Limit concurrency?)
+                    if (multiRes && multiRes.length > 0) {
+                        // Skip auto-shortening ALL multi-results to avoid spamming API.
+                    }
+                } catch (e) {
+                    console.error("Auto Shorten Failed", e);
+                }
+            };
+
+            const generateQR = (url) => {
                 setTimeout(() => {
                     if (qrRef.current) QRCode.toCanvas(qrRef.current, url, { width: 200, margin: 2 });
                 }, 100);
             };
 
+            // CSV Logic
+            const handleCsvUpload = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const text = evt.target.result;
+                    processCSV(text);
+                };
+                reader.readAsText(file);
+            };
+
+            const processCSV = async (text) => {
+                const lines = text.split('\n').map(l => l.trim()).filter(l => l);
+
+                if (mode === 'multi') {
+                    const newReceivers = [];
+                    const results = [];
+
+                    for (const line of lines) {
+                        const parts = line.split(',');
+                        const name = parts[0]?.trim();
+                        if (name) newReceivers.push(name);
+                    }
+                    setForm(prev => ({ ...prev, receivers: newReceivers.join(', ') }));
+                    alert(`${newReceivers.length}명의 수신자를 불러왔습니다. 내용 작성 후 전송을 눌러주세요.`);
+
+                } else if (mode === 'rolling') {
+                    // Start Smart Grouping Logic
+                    // Format: [Name, Sender, Content]
+
+                    const groups = {}; // Key: NormalizedName, Value: { name: OriginalName, msgs: [] }
+
+                    lines.forEach(line => {
+                        const parts = line.split(',');
+                        if (parts.length < 2) return;
+
+                        const receiverName = parts[0].trim();
+                        const senderName = parts[1].trim(); // Msg Sender
+                        const content = parts.slice(2).join(',').trim(); // Rest is content
+
+                        if (!receiverName || !content) return;
+
+                        // Normalize Key: Remove specials, keep Korean if exists
+                        let key = receiverName.replace(/[^가-힣a-zA-Z0-9]/g, '');
+                        if (/[가-힣]/.test(key)) key = key.replace(/[a-zA-Z]/g, '');
+
+                        if (!groups[key]) {
+                            groups[key] = { name: receiverName, msgs: [] };
+                        }
+                        groups[key].msgs.push({
+                            senderName: senderName || 'Anonymous',
+                            senderRole: '',
+                            content: content,
+                            id: Date.now() + Math.random()
+                        });
+                    });
+
+                    // Generate Rolling Papers
+                    const groupKeys = Object.keys(groups);
+                    if (groupKeys.length === 0) return alert('유효한 CSV 데이터가 없습니다.');
+
+                    if (confirm(`${groupKeys.length}명의 롤링페이퍼 그룹을 발견했습니다. 생성하시겠습니까?`)) {
+                        const newResults = [];
+                        for (const key of groupKeys) {
+                            const group = groups[key];
+                            const rollingData = {
+                                ...form,
+                                receiverName: group.name, // Origin Name
+                                content: `${group.msgs.length}개의 메시지`,
+                                messages: JSON.stringify(group.msgs),
+                                mailbox: ['sent'],
+                                date: new Date().toLocaleDateString()
+                            };
+                            const id = await window.LetterDB.generateID(rollingData);
+                            const finalData = { ...rollingData, id };
+                            await window.LetterDB.save(finalData);
+                            const url = window.LetterDB.toUrl(finalData, 'view.html');
+                            newResults.push({ name: group.name, url });
+                        }
+                        setMultiResults(newResults);
+                        setResultUrl(newResults[0].url);
+                        generateQR(newResults[0].url);
+                    }
+                }
+            };
+
+            // Variable Guide Dialog
+            const [openVarGuide, setOpenVarGuide] = useState(false);
+            const [guideTab, setGuideTab] = useState(0);
+
             return (
                 <ThemeProvider theme={theme}>
                     <CssBaseline />
 
-                    <AppBar position="sticky">
+                    <AppBar position="sticky" sx={{ px: { xs: 0, md: 2 } }}>
                         <Toolbar>
                             <IconButton edge="start" onClick={() => window.location.href = 'index.html'} sx={{ mr: 1, color: 'onSurface' }}>
                                 <span className="material-symbols-rounded">arrow_back</span>
                             </IconButton>
-                            <Typography variant="h6" sx={{ flex: 1, color: '#1D1B20' }}>
-                                새 편지
-                            </Typography>
-                            <Button onClick={handleSubmit} variant="contained" disableElevation sx={{ borderRadius: 20, px: 3 }}>
-                                보내기
-                            </Button>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                                <Typography variant="h6" sx={{ flex: 1, color: 'var(--md-sys-color-on-surface)', fontWeight: 600 }}>
+                                    새 편지 {form.id && <Chip label={form.id} size="small" sx={{ ml: 1, bgcolor: 'primary.container', color: 'onPrimaryContainer' }} />}
+                                </Typography>
+                                <Button onClick={handleSubmit} variant="contained" disableElevation sx={{ borderRadius: 20, px: 3 }}>
+                                    보내기
+                                </Button>
+                            </Stack>
                         </Toolbar>
                     </AppBar>
 
                     <Container maxWidth="md" sx={{ py: 4 }}>
-                        <Paper sx={{ p: 4, bgcolor: '#F7F2FA' }}>
+                        <Paper sx={{ p: 4, bgcolor: 'var(--T_surfaceContainer)' }}>
+                            <Tabs value={mode} onChange={(e, v) => setMode(v)} sx={{ mb: 3 }} variant="fullWidth">
+                                <Tab label="일반 편지" value="general" />
+                                <Tab label="다수 발송" value="multi" />
+                                <Tab label="롤링페이퍼" value="rolling" />
+                            </Tabs>
+
+                            <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 2, gap: 1 }}>
+                                <Button size="small" variant="text" startIcon={<span className="material-symbols-rounded">help</span>} onClick={() => setOpenVarGuide(true)}>
+                                    변수 도움말
+                                </Button>
+                                <Button component="label" size="small" variant="outlined" startIcon={<span className="material-symbols-rounded">upload_file</span>}>
+                                    CSV 업로드
+                                    <input type="file" accept=".csv" hidden onChange={handleCsvUpload} />
+                                </Button>
+                            </Box>
+
                             <Stack spacing={3}>
                                 <Box>
                                     <Typography variant="body2" color="textSecondary" gutterBottom sx={{ fontWeight: 500, mb: 1 }}>
                                         테마 색상
                                     </Typography>
-                                    <Stack direction="row" spacing={1} sx={{ overflowX: 'auto', pb: 1 }}>
+                                    <Stack direction="row" spacing={1} sx={{ overflowX: 'auto', pb: 1, '&::-webkit-scrollbar': { display: 'none' } }}>
                                         {THEMES.map(t => (
                                             <Chip
                                                 key={t.id}
@@ -163,36 +576,130 @@
                                                 color={form.theme === t.id ? 'primary' : 'default'}
                                                 icon={form.theme === t.id ? <span className="material-symbols-rounded" style={{ fontSize: 18 }}>check</span> : null}
                                                 sx={{
-                                                    '& .MuiChip-label': { px: 2 },
-                                                    bgcolor: form.theme === t.id ? 'primary.container' : 'transparent',
-                                                    color: form.theme === t.id ? 'onPrimaryContainer' : 'onSurfaceVariant',
-                                                    borderColor: 'outline'
+                                                    height: 36,
+                                                    px: 1,
+                                                    borderRadius: 10,
+                                                    fontWeight: 600,
+                                                    bgcolor: form.theme === t.id ? 'primary.main' : 'transparent',
+                                                    color: form.theme === t.id ? 'white' : 'onSurfaceVariant',
+                                                    '&:hover': { bgcolor: form.theme === t.id ? 'primary.main' : 'var(--T_surfaceContainer)' }
                                                 }}
                                             />
                                         ))}
                                     </Stack>
                                 </Box>
 
-                                <Typography variant="h5" color="primary" sx={{ mb: 1, fontWeight: 400 }}>편지 내용</Typography>
+                                <Stack direction="row" spacing={2} alignItems="center" justifyContent="space-between">
+                                    <Typography variant="h5" color="primary" sx={{ fontWeight: 400 }}>편지 내용</Typography>
+                                    <ToggleButtonGroup
+                                        value={form.contentType}
+                                        exclusive
+                                        onChange={(e, newType) => newType && setForm({ ...form, contentType: newType })}
+                                        size="small"
+                                        aria-label="content type"
+                                        sx={{ height: 32 }}
+                                    >
+                                        <ToggleButton value="text">Text</ToggleButton>
+                                        <ToggleButton value="markdown">MD</ToggleButton>
+                                        <ToggleButton value="html">HTML</ToggleButton>
+                                    </ToggleButtonGroup>
+                                </Stack>
 
                                 <TextField label="제목" name="subject" value={form.subject} onChange={handleChange} required placeholder="제목을 입력하세요" />
 
-                                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                                    <TextField label="받는사람 (이름)" name="receiverName" value={form.receiverName} onChange={handleChange} />
-                                    <TextField label="받는사람 (직함/역할)" name="receiverRole" value={form.receiverRole} onChange={handleChange} />
-                                </Stack>
+                                {mode !== 'multi' && (
+                                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                                        <TextField label="받는사람 (이름)" name="receiverName" value={form.receiverName} onChange={handleChange} required />
+                                        <TextField label="받는사람 (직함/역할)" name="receiverRole" value={form.receiverRole} onChange={handleChange} />
+                                    </Stack>
+                                )}
 
-                                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                                    <TextField label="보낸사람 (이름)" name="senderName" value={form.senderName} onChange={handleChange} />
-                                    <TextField label="보낸사람 (직함/역할)" name="senderRole" value={form.senderRole} onChange={handleChange} />
-                                </Stack>
+                                {mode === 'multi' && (
+                                    <TextField
+                                        label="받는사람 목록 (콤마 , 로 구분)"
+                                        name="receivers"
+                                        value={form.receivers}
+                                        onChange={handleChange}
+                                        required
+                                        placeholder="예: 철수, 영희, 민수"
+                                        helperText="여러 명에게 각각 다른 링크의 편지를 보냅니다."
+                                    />
+                                )}
 
-                                <TextField
-                                    label="내용" name="content"
-                                    multiline rows={8}
-                                    value={form.content} onChange={handleChange}
-                                    placeholder="전하고 싶은 말을 적어보세요..."
-                                />
+                                {mode !== 'rolling' && (
+                                    <Stack spacing={2}>
+                                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
+                                            <TextField label="보낸사람 (이름)" name="senderName" value={form.senderName} onChange={handleChange} sx={{ flex: 1 }} />
+                                            <TextField label="보낸사람 (직함/역할)" name="senderRole" value={form.senderRole} onChange={handleChange} sx={{ flex: 1 }} />
+                                            {profiles.length > 0 && (
+                                                <FormControl size="small" sx={{ minWidth: 120 }}>
+                                                    <InputLabel>프로필</InputLabel>
+                                                    <Select value={selectedProfile} label="프로필" onChange={handleProfileChange}>
+                                                        <MenuItem value="">직접 입력</MenuItem>
+                                                        {profiles.map(p => <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>)}
+                                                    </Select>
+                                                </FormControl>
+                                            )}
+                                        </Stack>
+                                    </Stack>
+                                )}
+
+                                {mode !== 'rolling' && (
+                                    <>
+                                        {form.contentType === 'html' ? (
+                                            <Box sx={{ bgcolor: 'background.paper', borderRadius: 2, overflow: 'hidden' }}>
+                                                <div id="editor" style={{ height: 300, backgroundColor: 'white' }}></div>
+                                            </Box>
+                                        ) : (
+                                            <TextField
+                                                label={`내용 (${form.contentType})`} name="content"
+                                                multiline rows={8}
+                                                value={form.content} onChange={handleChange}
+                                                placeholder={form.contentType === 'markdown' ? '# Markdown 내용을 입력하세요' : '전하고 싶은 말을 적어보세요... Tip: /{ 를 입력하여 변수를 사용해보세요.'}
+                                                required
+                                                onSelect={(e) => {
+                                                    // Track cursor for precise insertion if needed
+                                                }}
+                                            />
+                                        )}
+                                        <Menu
+                                            anchorEl={anchorEl}
+                                            open={Boolean(anchorEl)}
+                                            onClose={() => setAnchorEl(null)}
+                                        >
+                                            <MenuItem disabled><Typography variant="caption">변수 선택</Typography></MenuItem>
+                                            <Divider />
+                                            {['name', 'role', 'sender', 'Device', 'OS', 'Browser', 'Resolution', 'DarkMode', 'IP', 'Weather', 'year', 'month', 'day', 'weekday', 'time', 'ampm', 'Rand', 'Coin', 'Dice', 'Mob:', 'Des:'].map(v => (
+                                                <MenuItem key={v} onClick={() => handleVarSelect(v)}>{v}{!v.endsWith(':') && '}'}</MenuItem>
+                                            ))}
+                                        </Menu>
+                                    </>
+                                )}
+
+                                {mode === 'rolling' && (
+                                    <Box sx={{ bgcolor: 'var(--T_surfaceContainer)', p: 2, borderRadius: 2 }}>
+                                        <Typography variant="subtitle2" sx={{ mb: 1 }}>메시지 작성 ({form.messages.length}개)</Typography>
+                                        <Stack spacing={2} sx={{ mb: 2 }}>
+                                            {form.messages.map((m, i) => (
+                                                <Paper key={m.id || i} sx={{ p: 1.5, display: 'flex', alignItems: 'center' }}>
+                                                    <Box sx={{ flexGrow: 1 }}>
+                                                        <Typography variant="subtitle2">{m.senderName} <Typography component="span" variant="caption" color="text.secondary">{m.senderRole}</Typography></Typography>
+                                                        <Typography variant="body2" noWrap>{m.content}</Typography>
+                                                    </Box>
+                                                    <IconButton size="small" onClick={() => removeRollingMessage(m.id)}><span className="material-symbols-rounded">close</span></IconButton>
+                                                </Paper>
+                                            ))}
+                                        </Stack>
+                                        <Stack spacing={2}>
+                                            <Stack direction="row" spacing={1}>
+                                                <TextField size="small" label="작성자 이름" value={rollingInput.senderName} onChange={e => setRollingInput({ ...rollingInput, senderName: e.target.value })} sx={{ flex: 1 }} />
+                                                <TextField size="small" label="역할(선택)" value={rollingInput.senderRole} onChange={e => setRollingInput({ ...rollingInput, senderRole: e.target.value })} sx={{ flex: 1 }} />
+                                            </Stack>
+                                            <TextField size="small" label="내용" multiline rows={2} value={rollingInput.content} onChange={e => setRollingInput({ ...rollingInput, content: e.target.value })} />
+                                            <Button variant="outlined" onClick={addRollingMessage} startIcon={<span className="material-symbols-rounded">add</span>}>메시지 추가</Button>
+                                        </Stack>
+                                    </Box>
+                                )}
 
                                 <Typography variant="h5" color="secondary" sx={{ mb: 1, mt: 4, fontWeight: 400 }}>추가 정보</Typography>
 
@@ -200,41 +707,199 @@
                                     <TextField label="전화번호 (선택)" name="phone" value={form.phone} onChange={handleChange} placeholder="예: 010-1234-5678" />
                                     <TextField label="이메일 (선택)" name="email" value={form.email} onChange={handleChange} placeholder="예: user@example.com" />
                                 </Stack>
-                                <TextField label="첨부파일 링크 (URL)" name="driveLink" value={form.driveLink} onChange={handleChange} placeholder="https://" />
+                                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+                                    <TextField label="첨부파일 링크 (URL)" name="driveLink" value={form.driveLink} onChange={handleChange} placeholder="https://" sx={{ flex: 1 }} />
+                                    <TextField label="비밀번호 설정 (4~6자리 숫자)" name="password" value={form.password || ''} onChange={handleChange} placeholder="입력 시 잠금 적용" inputProps={{ maxLength: 6, pattern: "[0-9]*" }} sx={{ width: { sm: 200 } }} />
+                                </Stack>
 
                             </Stack>
                         </Paper>
                     </Container>
 
                     {/* Result Dialog */}
-                    <Dialog open={!!resultUrl} onClose={() => setResultUrl('')} maxWidth="xs" fullWidth>
-                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', p: 3 }}>
-                            <span className="material-symbols-rounded" style={{ fontSize: 48, color: '#6750A4', marginBottom: 16 }}>qr_code_2</span>
-                            <DialogTitle sx={{ p: 0, mb: 1 }}>작성 완료</DialogTitle>
-                            <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 3 }}>
+                    <Dialog open={!!originUrl} onClose={() => { setResultUrl(''); setOriginUrl(''); }} maxWidth="xs" fullWidth>
+                        <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', p: 4 }}>
+                            <span className="material-symbols-rounded" style={{ fontSize: 56, color: THEMES.find(t => t.id === form.theme)?.color || '#6750A4', marginBottom: 16 }}>check_circle</span>
+                            <DialogTitle sx={{ p: 0, mb: 1, fontWeight: 700 }}>작성 완료!</DialogTitle>
+                            <Typography variant="body2" color="text.secondary" align="center" sx={{ mb: 4 }}>
                                 QR 코드를 스캔하거나 링크를 복사하세요.
                             </Typography>
 
-                            <canvas ref={qrRef} style={{ borderRadius: 16, border: '1px solid #E0E0E0', marginBottom: 24 }} />
+                            <Box sx={{ p: 2, bgcolor: 'white', borderRadius: 4, border: '1px solid #E0E0E0', mb: 4, display: 'flex', justifyContent: 'center' }}>
+                                <canvas ref={qrRef} />
+                            </Box>
 
-                            <Paper variant="outlined" sx={{
-                                p: 2, width: '100%', bgcolor: '#F5F5F5', wordBreak: 'break-all',
-                                display: 'flex', alignItems: 'center', mb: 3, borderColor: '#CAC4D0'
-                            }}>
-                                <Typography variant="caption" sx={{ flexGrow: 1, color: '#49454F' }}>
-                                    {resultUrl}
-                                </Typography>
-                            </Paper>
-
-                            <Stack direction="row" spacing={2} sx={{ width: '100%' }}>
-                                <Button onClick={() => setResultUrl('')} fullWidth color="secondary" sx={{ borderRadius: 20 }}>닫기</Button>
-                                <Button variant="contained" fullWidth onClick={() => { navigator.clipboard.writeText(resultUrl); alert('복사되었습니다!'); }} disableElevation sx={{ borderRadius: 20 }}>
-                                    링크 복사
-                                </Button>
+                            <Stack spacing={2} sx={{ width: '100%', mb: 4 }}>
+                                {resultUrl && resultUrl !== originUrl && (
+                                    <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+                                        <Typography variant="caption" color="primary" sx={{ fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 }}>단축 URL</Typography>
+                                        <Typography variant="body2" sx={{ wordBreak: 'break-all', mt: 0.5, fontFamily: 'monospace' }}>{resultUrl}</Typography>
+                                        <Button fullWidth size="small" variant="tonal" sx={{ mt: 1.5, borderRadius: 12 }} onClick={() => { navigator.clipboard.writeText(resultUrl); alert('복사되었습니다.'); }}>단축 링크 복사</Button>
+                                    </Box>
+                                )}
+                                <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
+                                    <Typography variant="caption" color="secondary" sx={{ fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 }}>원본 URL (QR 연결됨)</Typography>
+                                    <Typography variant="body2" sx={{ wordBreak: 'break-all', mt: 0.5, fontSize: '0.75rem', opacity: 0.7, fontFamily: 'monospace' }}>{originUrl}</Typography>
+                                    <Button fullWidth size="small" variant="text" sx={{ mt: 1, borderRadius: 12 }} onClick={() => { navigator.clipboard.writeText(originUrl); alert('복사되었습니다.'); }}>원본 링크 복사</Button>
+                                </Box>
                             </Stack>
+
+                            {multiResults.length > 0 && (
+                                <Box sx={{ width: '100%', mb: 4 }}>
+                                    <Divider sx={{ mb: 2 }} />
+                                    <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 700 }}>개별 링크 목록 ({multiResults.length}명)</Typography>
+                                    <List dense sx={{ maxHeight: 200, overflow: 'auto', bgcolor: 'rgba(0,0,0,0.03)', borderRadius: 3, border: '1px solid #eee' }}>
+                                        {multiResults.map((res, i) => (
+                                            <ListItem key={i} secondaryAction={
+                                                <IconButton edge="end" size="small" onClick={() => { navigator.clipboard.writeText(res.url); alert(`${res.name}님 링크 복사됨`); }}>
+                                                    <span className="material-symbols-rounded" style={{ fontSize: 20 }}>content_copy</span>
+                                                </IconButton>
+                                            }>
+                                                <ListItemText
+                                                    primary={<Typography variant="body2" sx={{ fontWeight: 600 }}>{res.name}</Typography>}
+                                                    secondary={<Typography variant="caption" sx={{ wordBreak: 'break-all', opacity: 0.6 }}>{res.url.slice(0, 35)}...</Typography>}
+                                                />
+                                            </ListItem>
+                                        ))}
+                                    </List>
+                                    <Button fullWidth variant="outlined" startIcon={<span className="material-symbols-rounded">download</span>} sx={{ mt: 1.5, borderRadius: 12 }} onClick={() => {
+                                        const csvContent = "이름,URL\n" + multiResults.map(r => `${r.name},${r.url}`).join("\n");
+                                        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+                                        const link = document.createElement("a");
+                                        link.href = URL.createObjectURL(blob);
+                                        link.download = "mail2u_results.csv";
+                                        link.click();
+                                    }}>
+                                        결과 CSV 다운로드
+                                    </Button>
+                                </Box>
+                            )}
+
+                            <Button onClick={() => { setResultUrl(''); setOriginUrl(''); }} fullWidth color="secondary" variant="outlined" sx={{ borderRadius: 24 }}>닫기</Button>
                         </Box>
                     </Dialog>
-                </ThemeProvider>
+                    <Dialog open={openVarGuide} onClose={() => setOpenVarGuide(false)} maxWidth="md" fullWidth PaperProps={{ sx: { borderRadius: 7, maxWidth: '800px' } }}>
+                        <DialogTitle sx={{ bgcolor: 'primary.main', color: 'white', display: 'flex', alignItems: 'center', gap: 1 }}>
+                            <span className="material-symbols-rounded">help</span>
+                            사용자 가이드
+                        </DialogTitle>
+                        <Box sx={{ borderBottom: 1, borderColor: 'divider', bgcolor: 'primary.container', px: 1 }}>
+                            <Tabs value={guideTab} onChange={(e, v) => setGuideTab(v)} textColor="primary" indicatorColor="primary">
+                                <Tab label="고급 변수" />
+                                <Tab label="CSV 업로드" />
+                            </Tabs>
+                        </Box>
+                        <DialogContent dividers sx={{ p: 3, bgcolor: 'var(--T_surface)' }}>
+                            {guideTab === 0 && (
+                                <Box>
+                                    <Typography variant="body2" paragraph sx={{ bgcolor: 'primary.container', color: 'onPrimaryContainer', p: 2, borderRadius: 3, border: '1px solid', borderColor: 'primary.main' }}>
+                                        <Stack direction="row" spacing={1} alignItems="center">
+                                            <span className="material-symbols-rounded" style={{ fontSize: 20 }}>info</span>
+                                            <strong>Syntax:</strong>
+                                        </Stack>
+                                        이제 모든 모드(Text, MD, HTML)에서 변수는 <code>/{'{'}Variable{'}'}</code> 형태로 사용합니다.<br />
+                                        입력창에서 <code>/{'{'}</code>를 타이핑하면 자동완성 메뉴가 나타납니다.
+                                    </Typography>
+
+                                    <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>1. 기본 정보 (수신자/발신자)</Typography>
+                                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, overflowX: 'auto', borderRadius: 3, border: '1px solid', borderColor: 'divider', bgcolor: '#FFFFFF' }}>
+                                        <Table size="small">
+                                            <TableHead><TableRow sx={{ bgcolor: 'secondary.container' }}><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>변수명</TableCell><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>설명</TableCell><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>예시 출력</TableCell></TableRow></TableHead>
+                                            <TableBody>
+                                                <TableRow><TableCell><code>/&#123;name&#125;</code></TableCell><TableCell>받는사람 이름</TableCell><TableCell>홍길동</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;role&#125;</code></TableCell><TableCell>받는사람 역할</TableCell><TableCell>부장님</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;sender&#125;</code></TableCell><TableCell>보낸사람 이름</TableCell><TableCell>김철수</TableCell></TableRow>
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+
+                                    <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>2. 기기 및 환경 (조회 시점 기준)</Typography>
+                                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, overflowX: 'auto', borderRadius: 3, border: '1px solid', borderColor: 'divider', bgcolor: '#FFFFFF' }}>
+                                        <Table size="small">
+                                            <TableHead><TableRow sx={{ bgcolor: 'secondary.container' }}><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>변수명</TableCell><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>설명</TableCell><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>예시 출력</TableCell></TableRow></TableHead>
+                                            <TableBody>
+                                                <TableRow><TableCell><code>/&#123;Device&#125;</code></TableCell><TableCell>접속 기기</TableCell><TableCell>Mobile / Desktop</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;OS&#125;</code></TableCell><TableCell>운영체제</TableCell><TableCell>Windows, iOS, Android...</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;Browser&#125;</code></TableCell><TableCell>브라우저</TableCell><TableCell>Chrome, Safari...</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;Resolution&#125;</code></TableCell><TableCell>화면 해상도</TableCell><TableCell>FHD Landscape</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;DarkMode&#125;</code></TableCell><TableCell>다크모드 여부</TableCell><TableCell>Dark / Light</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;IP&#125;</code></TableCell><TableCell>접속 IP</TableCell><TableCell>123.45.67.89</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;Weather&#125;</code></TableCell><TableCell>날씨 (오픈API)</TableCell><TableCell>맑음, 24°C</TableCell></TableRow>
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+
+                                    <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>3. 날짜 및 시간</Typography>
+                                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, overflowX: 'auto', borderRadius: 3, border: '1px solid', borderColor: 'divider', bgcolor: '#FFFFFF' }}>
+                                        <Table size="small">
+                                            <TableHead><TableRow sx={{ bgcolor: 'secondary.container' }}><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>변수명</TableCell><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>설명</TableCell><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>예시</TableCell></TableRow></TableHead>
+                                            <TableBody>
+                                                <TableRow><TableCell><code>/&#123;year&#125;</code>, <code>/&#123;month&#125;</code>, <code>/&#123;day&#125;</code></TableCell><TableCell>년/월/일</TableCell><TableCell>2024, 1, 24</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;weekday&#125;</code></TableCell><TableCell>요일</TableCell><TableCell>토</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;time&#125;</code>, <code>/&#123;ampm&#125;</code></TableCell><TableCell>시간, 오전/오후</TableCell><TableCell>21:05, 오후</TableCell></TableRow>
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+
+                                    <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>4. 랜덤 및 특수 기능</Typography>
+                                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, overflowX: 'auto', borderRadius: 3, border: '1px solid', borderColor: 'divider', bgcolor: '#FFFFFF' }}>
+                                        <Table size="small">
+                                            <TableHead><TableRow sx={{ bgcolor: 'secondary.container' }}><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>변수명</TableCell><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>설명</TableCell><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>출력 형태</TableCell></TableRow></TableHead>
+                                            <TableBody>
+                                                <TableRow><TableCell><code>/&#123;Rand&#125;</code></TableCell><TableCell>1~100 랜덤 숫자</TableCell><TableCell>42</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;Rand:1-10&#125;</code></TableCell><TableCell>지정 범위 랜덤 숫자</TableCell><TableCell>7</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;Coin&#125;</code>, <code>/&#123;Dice&#125;</code></TableCell><TableCell>동전 / 주사위</TableCell><TableCell>앞면 / 6</TableCell></TableRow>
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+
+                                    <Typography variant="subtitle2" gutterBottom sx={{ mt: 2 }}>5. 스마트 조건부 메시지</Typography>
+                                    <TableContainer component={Paper} variant="outlined" sx={{ mb: 2, overflowX: 'auto', borderRadius: 3, border: '1px solid', borderColor: 'divider', bgcolor: '#FFFFFF' }}>
+                                        <Table size="small">
+                                            <TableHead><TableRow sx={{ bgcolor: 'secondary.container' }}><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>변수명</TableCell><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>조건</TableCell><TableCell sx={{ fontWeight: 700, color: 'secondary.onContainer' }}>설명</TableCell></TableRow></TableHead>
+                                            <TableBody>
+                                                <TableRow><TableCell><code>/&#123;Mob:내용&#125;</code></TableCell><TableCell>모바일 접속 시</TableCell><TableCell>'내용' 출력</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;Des:내용&#125;</code></TableCell><TableCell>PC 접속 시</TableCell><TableCell>'내용' 출력</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;IOS:내용&#125;</code></TableCell><TableCell>아이폰 접속 시</TableCell><TableCell>기타 OS(ANDROID 등)도 가능</TableCell></TableRow>
+                                                <TableRow><TableCell><code>/&#123;Device=Mobile=폰&#125;</code></TableCell><TableCell>직접 비교</TableCell><TableCell>/&#123;Key=Value=Text&#125; 형태</TableCell></TableRow>
+                                            </TableBody>
+                                        </Table>
+                                    </TableContainer>
+                                </Box>
+                            )}
+                            {guideTab === 1 && (
+                                <Box>
+                                    <Typography variant="subtitle1" gutterBottom>CSV 파일 규칙</Typography>
+                                    <Typography variant="body2" sx={{ mb: 2 }}>
+                                        엑셀에서 작업 후 <strong>.csv (쉼표로 분리)</strong> 형식으로 저장하세요.
+                                    </Typography>
+
+                                    <Typography variant="subtitle2" color="primary">Case A: 다수 발송 모드</Typography>
+                                    <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#fafafa', fontFamily: 'monospace' }}>
+                                        홍길동<br />
+                                        김철수<br />
+                                        이영희
+                                    </Paper>
+                                    <Typography variant="caption" display="block" sx={{ mb: 2 }}>첫 번째 열에 이름만 입력하면 됩니다.</Typography>
+
+                                    <Typography variant="subtitle2" color="secondary">Case B: 롤링페이퍼 모드 (스마트 그룹)</Typography>
+                                    <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#fafafa', fontFamily: 'monospace' }}>
+                                        선생님, 제자1, 감사합니다!<br />
+                                        선생님, 제자2, 존경합니다.<br />
+                                        팀장님, 김대리, 생신 축하드려요.
+                                    </Paper>
+                                    <Typography variant="caption" display="block">
+                                        <strong>순서: 받는사람, 보낸사람, 내용</strong><br />
+                                        받는사람 이름이 같으면 자동으로 하나의 롤링페이퍼로 묶입니다.
+                                    </Typography>
+                                </Box>
+                            )}
+                        </DialogContent>
+                        <DialogActions>
+                            <Button onClick={() => setOpenVarGuide(false)}>닫기</Button>
+                        </DialogActions>
+                    </Dialog>
+                </ThemeProvider >
             );
         }
 

@@ -13,11 +13,22 @@
     <link rel="stylesheet"
         href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0" />
     <link rel="stylesheet" href="./material3.css" />
+    <style>
+        :root {
+            --G_white: #FFFFFF;
+            --G_black: #000000;
+            --G_gray_dark: #1D1B20;
+            --G_gray_medium: #49454F;
+            --G_gray_light: #E7E0EB;
+            --G_divider: rgba(0, 0, 0, 0.12);
+        }
+    </style>
 
     <!-- React & MUI Dependencies -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://unpkg.com/@mui/material@5.16.1/umd/material-ui.development.js"
         crossorigin="anonymous"></script>
     <script src="./db.js"></script>
@@ -27,174 +38,419 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useState, useEffect } = React;
+        const { useState, useEffect, useMemo, useRef } = React;
+        const MaterialUI = window.MaterialUI || window.Mui;
         const {
             createTheme, ThemeProvider, CssBaseline,
             Box, Typography, Paper, Grid, Card, CardActionArea, CardContent, CardActions, Button, IconButton,
-            Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText,
+            Drawer, List, ListItem, ListItemButton, ListItemIcon, ListItemText, Divider, TextField, Stack,
             BottomNavigation, BottomNavigationAction, AppBar, Toolbar, Fab, useMediaQuery,
-            Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions
+            Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
+            Tab, Tabs, Snackbar, Chip
         } = MaterialUI;
 
-        // Material Design 3 Theme
-        const theme = createTheme({
-            typography: {
-                fontFamily: `'Roboto', 'Pretendard', sans-serif`,
-                h6: { fontWeight: 500 },
-                button: { textTransform: 'none', fontWeight: 500 }
-            },
-            palette: {
-                mode: 'light',
-                primary: { main: '#6750A4' },
-                secondary: { main: '#625B71' },
-                background: { default: '#FEF7FF', paper: '#F7F2FA' }, // Surface Container Low/High
-                text: { primary: '#1D1B20', secondary: '#49454F' },
-            },
-            components: {
-                MuiCard: {
-                    styleOverrides: {
-                        root: {
-                            borderRadius: 16,
-                            boxShadow: 'none',
-                            backgroundColor: '#F3EDF7', // Surface Container
-                            transition: 'background-color 0.2s',
-                            '&:hover': { backgroundColor: '#EADDFF' }
-                        }
-                    }
-                },
-                MuiButton: {
-                    styleOverrides: {
-                        root: { borderRadius: 20 },
-                        contained: { boxShadow: 'none', '&:hover': { boxShadow: '0 1px 2px rgba(0,0,0,0.3)' } }
-                    }
-                },
-                MuiPaper: {
-                    defaultProps: { elevation: 0 },
-                    styleOverrides: {
-                        root: { borderRadius: 16 }
-                    }
-                },
-                MuiDrawer: {
-                    styleOverrides: {
-                        paper: {
-                            borderTopRightRadius: 16, borderBottomRightRadius: 16,
-                            border: 'none', backgroundColor: '#F7F2FA', margin: '12px', height: 'calc(100% - 24px)'
-                        }
-                    }
-                },
-                MuiListItemButton: {
-                    styleOverrides: {
-                        root: { borderRadius: 28, margin: '4px 8px', '&.Mui-selected': { backgroundColor: '#E8DEF8' } }
-                    }
-                },
-                MuiAppBar: {
-                    styleOverrides: {
-                        root: { backgroundColor: '#FEF7FF', color: '#1D1B20', boxShadow: 'none' }
-                    }
-                }
-            }
-        });
+        const THEMES = [
+            { id: 'm3_purple', color: '#6750A4', name: 'M3 퍼플' },
+            { id: 'mint', color: '#008272', name: '민트 틸' },
+            { id: 'berry', color: '#0067C0', name: '오션 블루' }, // Changed from Berry (#8764B8) to Blue
+            { id: 'candy', color: '#E3008C', name: '캔디 핑크' },
+            { id: 'forest', color: '#004E4C', name: '포레스트 그린' },
+            { id: 'pumpkin', color: '#D83B01', name: '펌킨 오렌지' },
+            { id: 'zinc', color: '#505050', name: '징크 그레이' },
+        ];
 
         function App() {
             const isDesktop = useMediaQuery('(min-width:900px)');
             const [letters, setLetters] = useState([]);
             const [deleteId, setDeleteId] = useState(null);
+            const [deleteProfileId, setDeleteProfileId] = useState(null);
+            const [tab, setTab] = useState(0);
+            const [openProfile, setOpenProfile] = useState(false);
+            const [openSettings, setOpenSettings] = useState(false);
+            const [profileForm, setProfileForm] = useState({ name: '', senderName: '', senderRole: '', phone: '', email: '', defaultTheme: 'm3_purple' });
+            const [profiles, setProfiles] = useState([]);
+            const [uiThemeId, setUiThemeId] = useState('m3_purple');
 
-            useEffect(() => { refresh(); }, []);
-            const refresh = () => window.LetterDB.getAll().then(setLetters);
+            const [selectionMode, setSelectionMode] = useState(false);
+            const [selectedIds, setSelectedIds] = useState([]);
+            const [snackbar, setSnackbar] = useState({ open: false, message: '' });
+            const [openQr, setOpenQr] = useState(false);
+            const fileInputRef = useRef();
+            const qrScannerRef = useRef(null);
 
-            const handleDelete = async () => {
-                await window.LetterDB.delete(deleteId);
-                setDeleteId(null);
+            // Dynamic Theme
+            const theme = useMemo(() => {
+                const t = THEMES.find(x => x.id === uiThemeId) || THEMES[0];
+                return createTheme({
+                    typography: {
+                        fontFamily: `'Roboto', 'Pretendard', sans-serif`,
+                        h6: { fontWeight: 500 },
+                        button: { textTransform: 'none', fontWeight: 500 }
+                    },
+                    palette: {
+                        mode: 'light',
+                        primary: { main: t.color },
+                        secondary: { main: t.color },
+                        background: {
+                            default: t.color + '08', // 3% tint (08 = ~3%)
+                            paper: '#FFFFFF'
+                        },
+                        text: { primary: '#1D1B20', secondary: '#49454F' },
+                    },
+                    components: {
+                        MuiCssBaseline: {
+                            styleOverrides: `
+                                :root {
+                                    --T_primary: ${t.color};
+                                    --T_background: ${t.color}08;
+                                    --T_surface: #FFFFFF;
+                                    --T_surfaceContainer: ${t.color}15;
+                                    
+                                    --L_primary: var(--T_primary);
+                                    --L_container: var(--T_surfaceContainer);
+                                    --L_onContainer: var(--T_primary);
+                                }
+                                body { background-color: var(--T_background) !important; }
+                            `
+                        },
+                        MuiCard: {
+                            styleOverrides: {
+                                root: {
+                                    borderRadius: 16,
+                                    boxShadow: '0 2px 6px rgba(0,0,0,0.08)',
+                                    backgroundColor: 'var(--L_container)', // 배경보다 진한 테마 컨테이너 색상
+                                    border: '1px solid var(--G_gray_light)',
+                                    transition: 'all 0.2s',
+                                    '&:hover': {
+                                        backgroundColor: 'var(--L_container)',
+                                        boxShadow: '0 4px 12px rgba(0,0,0,0.12)',
+                                        transform: 'translateY(-2px)'
+                                    }
+                                }
+                            }
+                        },
+                        MuiButton: {
+                            styleOverrides: {
+                                root: { borderRadius: 20, padding: '10px 24px' },
+                                contained: { boxShadow: 'none' }
+                            }
+                        },
+                        MuiFab: {
+                            styleOverrides: {
+                                root: { borderRadius: 16, '&.MuiFab-extended': { borderRadius: 28, padding: '0 24px' } }
+                            }
+                        },
+                        MuiPaper: { defaultProps: { elevation: 0 }, styleOverrides: { root: { borderRadius: 16 } } },
+                        MuiDrawer: {
+                            styleOverrides: {
+                                paper: {
+                                    borderTopRightRadius: 16,
+                                    borderBottomRightRadius: 16,
+                                    border: 'none',
+                                    backgroundColor: 'var(--T_surface)',
+                                    margin: '12px',
+                                    height: 'calc(100% - 24px)'
+                                }
+                            }
+                        },
+                        MuiListItemButton: {
+                            styleOverrides: {
+                                root: { borderRadius: 28, margin: '4px 8px', '&.Mui-selected': { backgroundColor: 'var(--L_container)' } }
+                            }
+                        },
+                        MuiAppBar: {
+                            styleOverrides: {
+                                root: { backgroundColor: 'var(--T_surface)', color: 'var(--G_gray_dark)', boxShadow: 'none', borderBottom: '1px solid var(--G_gray_light)' }
+                            }
+                        }
+                    }
+                });
+            }, [uiThemeId]);
+
+            useEffect(() => {
                 refresh();
+                loadProfiles();
+                const settings = JSON.parse(localStorage.getItem('mail2u_settings') || '{}');
+                if (settings.m3_theme) setUiThemeId(settings.m3_theme);
+            }, []);
+
+            const refresh = () => window.LetterDB.getAll().then(l => {
+                // Normalize mailbox to array locally for easier handling
+                const normalized = l.map(x => ({
+                    ...x,
+                    mailbox: Array.isArray(x.mailbox) ? x.mailbox : [x.mailbox || 'inbox']
+                }));
+                setLetters(normalized);
+            });
+
+            const loadProfiles = () => {
+                const stored = localStorage.getItem('mail2u_profiles');
+                if (stored) setProfiles(JSON.parse(stored));
             };
 
-            const goWrite = () => window.location.href = 'write.html?mode=mui';
-            const goRead = (l) => window.location.href = window.LetterDB.toUrl({ ...l, mode: 'mui' }, 'view.html');
+            const changeUiTheme = (id) => {
+                setUiThemeId(id);
+                const settings = JSON.parse(localStorage.getItem('mail2u_settings') || '{}');
+                settings.m3_theme = id;
+                localStorage.setItem('mail2u_settings', JSON.stringify(settings));
+            };
+
+            // Filter letters
+            const filteredLetters = letters.filter(l => {
+                if (tab === 0) return l.mailbox.includes('inbox');
+                if (tab === 1) return l.mailbox.includes('sent');
+                if (tab === 2) return l.mailbox.includes('draft');
+                return false;
+            }).sort((a, b) => new Date(b.updatedAt || b.date) - new Date(a.updatedAt || a.date));
+
+            const handleDelete = async () => {
+                const target = letters.find(l => l.id === deleteId);
+                if (target) {
+                    const currentTabTag = tab === 0 ? 'inbox' : (tab === 1 ? 'sent' : 'draft');
+                    const newTags = target.mailbox.filter(M => M !== currentTabTag);
+
+                    if (newTags.length === 0) {
+                        // No tags left, completely delete
+                        await window.LetterDB.delete(deleteId);
+                    } else {
+                        // Update tags
+                        await window.LetterDB.save({ ...target, mailbox: newTags });
+                    }
+                }
+                setDeleteId(null);
+                refresh();
+                setSnackbar({ open: true, message: '삭제되었습니다.' });
+            };
+
+            const toggleSelection = (id) => {
+                setSelectedIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
+            };
+
+            const handlePrint = () => {
+                if (selectedIds.length === 0) return alert('인쇄할 편지를 선택해주세요.');
+                localStorage.setItem('mail2u_print_queue', JSON.stringify(selectedIds));
+                window.open('print.html', '_blank');
+                setSelectionMode(false);
+                setSelectedIds([]);
+            };
+
+            const exportAll = () => {
+                const settings = JSON.parse(localStorage.getItem('mail2u_settings') || '{}');
+                const p = JSON.parse(localStorage.getItem('mail2u_profiles') || '[]');
+                const backup = { settings, profiles: p, letters };
+                const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = `mail2u_backup_${new Date().toISOString().slice(0, 10)}.json`;
+                a.click();
+            };
+
+            const importAll = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        if (data.settings) localStorage.setItem('mail2u_settings', JSON.stringify(data.settings));
+                        if (data.profiles) localStorage.setItem('mail2u_profiles', JSON.stringify(data.profiles));
+                        if (data.letters) {
+                            for (const l of data.letters) await window.LetterDB.save(l);
+                        }
+                        alert('복원 완료. 페이지를 새로고침합니다.');
+                        window.location.reload();
+                    } catch (err) { alert('파일 오류'); }
+                };
+                reader.readAsText(file);
+            };
+
+            const goWrite = (draftId) => {
+                if (draftId && typeof draftId === 'string') window.location.href = `write.html?draftId=${draftId}`;
+                else window.location.href = 'write.html';
+            };
+            const goRead = (l) => {
+                if (l.mailbox.includes('draft')) goWrite(l.id);
+                else window.location.href = window.LetterDB.toUrl({ ...l, mode: 'mui' }, 'view.html');
+            };
+
+            // Profile
+            const saveProfile = () => {
+                if (!profileForm.name) return alert('이름을 입력하세요.');
+                const newProfiles = [...profiles];
+                const idx = newProfiles.findIndex(p => p.id === profileForm.id);
+                const toSave = idx >= 0 ? profileForm : { ...profileForm, id: Date.now().toString() };
+                if (idx >= 0) newProfiles[idx] = toSave;
+                else newProfiles.push(toSave);
+                localStorage.setItem('mail2u_profiles', JSON.stringify(newProfiles));
+                setProfiles(newProfiles);
+                setProfileForm({ name: '', senderName: '', senderRole: '', phone: '', email: '', defaultTheme: 'm3_purple' });
+                setSnackbar({ open: true, message: '저장되었습니다.' });
+            };
+
+            const deleteProfile = (id) => {
+                setDeleteProfileId(id);
+            };
+
+            const confirmDeleteProfile = () => {
+                if (!deleteProfileId) return;
+                const newProfiles = profiles.filter(p => p.id !== deleteProfileId);
+                localStorage.setItem('mail2u_profiles', JSON.stringify(newProfiles));
+                setProfiles(newProfiles);
+
+                // If deleting currently editing profile, clear form
+                if (profileForm.id === deleteProfileId) {
+                    setProfileForm({ name: '', senderName: '', senderRole: '', phone: '', email: '', defaultTheme: 'm3_purple', id: undefined });
+                }
+
+                setDeleteProfileId(null);
+                setSnackbar({ open: true, message: '프로필이 삭제되었습니다.' });
+            };
+
+            const startQrScan = () => {
+                setOpenQr(true);
+                setTimeout(() => {
+                    if (qrScannerRef.current) {
+                        qrScannerRef.current.clear();
+                    }
+                    const scanner = new Html5Qrcode("reader");
+                    qrScannerRef.current = scanner;
+
+                    scanner.start(
+                        { facingMode: "environment" },
+                        { fps: 10, qrbox: { width: 250, height: 250 } },
+                        (decodedText) => {
+                            // Success
+                            scanner.stop().then(() => {
+                                setOpenQr(false);
+                                if (decodedText.includes('mail2u') || confirm(`외부 링크입니다. 이동하시겠습니까?\n${decodedText}`)) {
+                                    window.location.href = decodedText;
+                                }
+                            });
+                        },
+                        (errorMessage) => { /* ignore */ }
+                    ).catch(err => {
+                        console.error(err);
+                        alert('카메라를 시작할 수 없습니다. 권한을 확인해주세요.');
+                        setOpenQr(false);
+                    });
+                }, 100);
+            };
+
+            const closeQr = () => {
+                if (qrScannerRef.current) {
+                    qrScannerRef.current.stop().then(() => {
+                        qrScannerRef.current.clear();
+                        setOpenQr(false);
+                    }).catch(err => {
+                        console.error(err);
+                        setOpenQr(false);
+                    });
+                } else {
+                    setOpenQr(false);
+                }
+            };
 
             return (
                 <ThemeProvider theme={theme}>
                     <CssBaseline />
                     <Box sx={{ display: 'flex', height: '100vh', flexDirection: isDesktop ? 'row' : 'column', bgcolor: 'background.default' }}>
 
-                        {/* Desktop Navigation Rail / Drawer */}
+                        {/* Desktop Drawer */}
                         {isDesktop && (
                             <Drawer variant="permanent" sx={{ width: 300, flexShrink: 0, '& .MuiDrawer-paper': { width: 300, boxSizing: 'border-box' } }}>
                                 <Toolbar sx={{ pl: 3 }}>
-                                    <span className="material-symbols-rounded" style={{ fontSize: 32, color: '#6750A4', marginRight: 12 }}>mail</span>
-                                    <Typography variant="h6" color="onSurface" sx={{ fontWeight: 600 }}>
-                                        Mail 2 U
-                                    </Typography>
+                                    <span className="material-symbols-rounded" style={{ fontSize: 32, color: theme.palette.primary.main, marginRight: 12 }}>mail</span>
+                                    <Typography variant="h6" color="onSurface" sx={{ fontWeight: 600 }}>Mail 2 U</Typography>
                                 </Toolbar>
                                 <Box sx={{ p: 2 }}>
-                                    <Fab variant="extended" color="primary" sx={{ boxShadow: 'none', width: '100%', justifyContent: 'flex-start', pl: 3 }} onClick={goWrite}>
+                                    <Fab variant="extended" color="primary" sx={{ boxShadow: 'none', width: '100%', justifyContent: 'flex-start', pl: 3 }} onClick={() => goWrite()}>
                                         <span className="material-symbols-rounded" style={{ marginRight: 12 }}>edit</span>
-                                        Compose
+                                        편지 쓰기
                                     </Fab>
+                                    <Button variant="outlined" color="primary" fullWidth sx={{ mt: 2, borderRadius: 4, height: 48, justifyContent: 'flex-start', pl: 3 }} onClick={startQrScan}>
+                                        <span className="material-symbols-rounded" style={{ marginRight: 12 }}>qr_code_scanner</span>
+                                        QR 스캔
+                                    </Button>
+                                    <Button variant={selectionMode ? "contained" : "outlined"} color={selectionMode ? "secondary" : "primary"} fullWidth sx={{ mt: 1, borderRadius: 4, height: 48, justifyContent: 'flex-start', pl: 3 }} onClick={() => { setSelectionMode(!selectionMode); setSelectedIds([]); }}>
+                                        <span className="material-symbols-rounded" style={{ marginRight: 12 }}>{selectionMode ? 'close' : 'print'}</span>
+                                        {selectionMode ? '취소' : '선택 인쇄'}
+                                    </Button>
+                                    {selectionMode && <Button variant="contained" color="secondary" fullWidth sx={{ mt: 1, borderRadius: 4 }} onClick={handlePrint} disabled={selectedIds.length === 0}>인쇄 ({selectedIds.length})</Button>}
                                 </Box>
-                                <List sx={{ px: 1 }}>
-                                    <ListItem disablePadding><ListItemButton selected><ListItemIcon><span className="material-symbols-rounded">inbox</span></ListItemIcon><ListItemText primary="받은 편지함" /></ListItemButton></ListItem>
-                                    <ListItem disablePadding><ListItemButton><ListItemIcon><span className="material-symbols-rounded">star</span></ListItemIcon><ListItemText primary="즐겨찾기" /></ListItemButton></ListItem>
-                                    <ListItem disablePadding><ListItemButton><ListItemIcon><span className="material-symbols-rounded">send</span></ListItemIcon><ListItemText primary="보낸 편지함" /></ListItemButton></ListItem>
+                                <Tabs orientation="vertical" value={tab} onChange={(e, v) => setTab(v)} sx={{ px: 1, '& .MuiTab-root': { alignItems: 'flex-start', justifyContent: 'flex-start', minHeight: 48, borderRadius: 28, px: 3, mb: 1 } }} TabIndicatorProps={{ style: { display: 'none' } }}>
+                                    <Tab icon={<span className="material-symbols-rounded" style={{ marginRight: 12 }}>inbox</span>} iconPosition="start" label="받은 편지함" sx={{ '&.Mui-selected': { bgcolor: 'secondary.container' } }} />
+                                    <Tab icon={<span className="material-symbols-rounded" style={{ marginRight: 12 }}>send</span>} iconPosition="start" label="보낸 편지함" sx={{ '&.Mui-selected': { bgcolor: 'secondary.container' } }} />
+                                    <Tab icon={<span className="material-symbols-rounded" style={{ marginRight: 12 }}>draft</span>} iconPosition="start" label="임시 보관함" sx={{ '&.Mui-selected': { bgcolor: 'secondary.container' } }} />
+                                </Tabs>
+                                <Divider sx={{ my: 1, mx: 2 }} />
+                                <List>
+                                    <ListItemButton onClick={() => setOpenProfile(true)}>
+                                        <ListItemIcon><span className="material-symbols-rounded">manage_accounts</span></ListItemIcon>
+                                        <ListItemText primary="프로필 관리" />
+                                    </ListItemButton>
+                                    <ListItemButton onClick={() => setOpenSettings(true)}>
+                                        <ListItemIcon><span className="material-symbols-rounded">settings</span></ListItemIcon>
+                                        <ListItemText primary="설정" />
+                                    </ListItemButton>
                                 </List>
                             </Drawer>
                         )}
 
                         {/* Mobile Header */}
                         {!isDesktop && (
-                            <AppBar position="fixed">
+                            <AppBar position="fixed" color="default" sx={{ bgcolor: 'var(--T_surface)', boxShadow: 'none', borderBottom: '1px solid var(--G_gray_light)' }}>
                                 <Toolbar>
-                                    <Typography variant="h5" sx={{ flexGrow: 1, fontWeight: 500 }}>받은 편지함</Typography>
-                                    <IconButton size="large" onClick={goWrite} sx={{ bgcolor: 'primary.container', color: 'onPrimaryContainer' }}>
-                                        <span className="material-symbols-rounded">edit</span>
-                                    </IconButton>
+                                    <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
+                                        <span className="material-symbols-rounded" style={{ fontSize: 24, color: theme.palette.primary.main, marginRight: 8 }}>mail</span>
+                                        <Typography variant="h6" sx={{ fontWeight: 600 }}>Mail 2 U</Typography>
+                                    </Box>
+                                    <IconButton onClick={startQrScan}><span className="material-symbols-rounded">qr_code_scanner</span></IconButton>
+                                    <IconButton onClick={() => setOpenSettings(true)}><span className="material-symbols-rounded">settings</span></IconButton>
+                                    <IconButton onClick={() => setOpenProfile(true)}><span className="material-symbols-rounded">account_circle</span></IconButton>
                                 </Toolbar>
                             </AppBar>
                         )}
 
-                        {/* Main Content */}
-                        <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 }, pt: { xs: 10, md: 3 }, overflow: 'auto', pb: 10 }}>
-                            {letters.length === 0 ? (
+                        {/* Mobile Nav */}
+                        {!isDesktop && (
+                            <BottomNavigation value={tab} onChange={(e, v) => setTab(v)} sx={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 80, bgcolor: 'var(--T_surfaceContainer)', borderTop: '1px solid var(--G_gray_light)' }}>
+                                <BottomNavigationAction label="수신함" icon={<span className="material-symbols-rounded">inbox</span>} />
+                                <BottomNavigationAction label="발신함" icon={<span className="material-symbols-rounded">send</span>} />
+                                <BottomNavigationAction label="임시저장" icon={<span className="material-symbols-rounded">draft</span>} />
+                            </BottomNavigation>
+                        )}
+
+                        {/* Content */}
+                        <Box component="main" sx={{ flexGrow: 1, p: { xs: 2, md: 3 }, pt: { xs: 10, md: 3 }, overflow: 'auto', pb: 12 }}>
+                            {filteredLetters.length === 0 ? (
                                 <Box sx={{ textAlign: 'center', mt: 10, opacity: 0.6 }}>
-                                    <span className="material-symbols-rounded" style={{ fontSize: 64, color: 'var(--md-sys-color-outline)' }}>inbox</span>
-                                    <Typography variant="body1">편지함이 비었습니다</Typography>
+                                    <span className="material-symbols-rounded" style={{ fontSize: 64, color: 'var(--md-sys-color-outline)' }}>{tab === 0 ? 'inbox' : (tab === 1 ? 'send' : 'draft')}</span>
+                                    <Typography variant="body1">{tab === 0 ? '받은 편지가 없습니다' : (tab === 1 ? '보낸 편지가 없습니다' : '임시 저장된 편지가 없습니다')}</Typography>
                                 </Box>
                             ) : (
                                 <Grid container spacing={2}>
-                                    {letters.map(l => (
+                                    {filteredLetters.map(l => (
                                         <Grid item xs={12} sm={6} md={6} lg={4} key={l.id}>
-                                            <Card>
-                                                <CardActionArea onClick={() => goRead(l)} sx={{ p: 2, pb: 1 }}>
-                                                    <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 600, mb: 1 }}>
-                                                        {l.subject || '제목 없음'}
-                                                    </Typography>
+                                            <Card sx={{ position: 'relative', border: selectionMode && selectedIds.includes(l.id) ? `2px solid ${theme.palette.primary.main}` : 'none' }}>
+                                                {selectionMode && (
+                                                    <Box sx={{ position: 'absolute', top: 8, right: 8, zIndex: 10 }}>
+                                                        <span className="material-symbols-rounded" style={{ color: selectedIds.includes(l.id) ? theme.palette.primary.main : '#CCC', fontSize: 28, background: 'rgba(255,255,255,0.8)', borderRadius: '50%' }}>
+                                                            {selectedIds.includes(l.id) ? 'check_circle' : 'radio_button_unchecked'}
+                                                        </span>
+                                                    </Box>
+                                                )}
+                                                <CardActionArea onClick={() => selectionMode ? toggleSelection(l.id) : goRead({ ...l, editable: true })} sx={{ p: 2, pb: 1 }}>
+                                                    <Typography variant="h6" sx={{ fontSize: '1rem', fontWeight: 600, mb: 1 }}>{l.subject || '제목 없음'}</Typography>
                                                     <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
-                                                        <Typography variant="body2" color="text.secondary">
-                                                            보낸사람: {l.senderName}
-                                                        </Typography>
-                                                        <Typography variant="body2" color="text.secondary">
-                                                            받는사람: {l.receiverName}
-                                                        </Typography>
+                                                        <Typography variant="body2" color="text.secondary">보낸사람: {l.senderName}</Typography>
+                                                        <Typography variant="body2" color="text.secondary">받는사람: {l.receiverName}</Typography>
                                                     </Box>
                                                 </CardActionArea>
                                                 <CardActions sx={{ px: 2, pb: 2 }}>
-                                                    {/* Action Buttons requested by user */}
-                                                    {l.phone && (
-                                                        <IconButton size="small" href={`tel:${l.phone}`} color="primary">
-                                                            <span className="material-symbols-rounded">call</span>
-                                                        </IconButton>
-                                                    )}
-                                                    {l.email && (
-                                                        <IconButton size="small" href={`mailto:${l.email}`} color="primary">
-                                                            <span className="material-symbols-rounded">email</span>
-                                                        </IconButton>
-                                                    )}
-
+                                                    {l.phone && <IconButton size="small" href={`tel:${l.phone}`} color="primary"><span className="material-symbols-rounded">call</span></IconButton>}
+                                                    {l.email && <IconButton size="small" href={`mailto:${l.email}`} color="primary"><span className="material-symbols-rounded">email</span></IconButton>}
                                                     <Box sx={{ flexGrow: 1 }} />
-
-                                                    <IconButton size="small" onClick={() => setDeleteId(l.id)}>
-                                                        <span className="material-symbols-rounded">delete</span>
-                                                    </IconButton>
+                                                    <IconButton size="small" onClick={() => setDeleteId(l.id)}><span className="material-symbols-rounded">delete</span></IconButton>
                                                 </CardActions>
                                             </Card>
                                         </Grid>
@@ -203,17 +459,121 @@
                             )}
                         </Box>
 
-                        {/* Delete Dialog */}
+                        {/* Modals */}
                         <Dialog open={!!deleteId} onClose={() => setDeleteId(null)} PaperProps={{ sx: { borderRadius: 7, p: 2 } }}>
-                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 2 }}>
-                                <span className="material-symbols-rounded" style={{ fontSize: 32, color: '#B3261E', marginBottom: 16 }}>delete</span>
-                                <DialogTitle sx={{ p: 0 }}>편지를 삭제하시겠습니까?</DialogTitle>
-                            </Box>
-                            <DialogContent sx={{ textAlign: 'center' }}><DialogContentText>이 작업은 되돌릴 수 없습니다.</DialogContentText></DialogContent>
-                            <DialogActions sx={{ justifyContent: 'center' }}>
-                                <Button onClick={() => setDeleteId(null)} color="secondary">취소</Button>
-                                <Button onClick={handleDelete} variant="contained" color="error" disableElevation>삭제</Button>
+                            <DialogTitle>삭제하시겠습니까?</DialogTitle>
+                            <DialogActions>
+                                <Button onClick={() => setDeleteId(null)}>취소</Button>
+                                <Button onClick={handleDelete} variant="contained" color="error">삭제</Button>
                             </DialogActions>
+                        </Dialog>
+
+                        {/* Profile Dialog */}
+                        <Dialog open={openProfile} onClose={() => setOpenProfile(false)} fullWidth maxWidth="sm" PaperProps={{ sx: { borderRadius: 7 } }}>
+                            <DialogTitle>프로필 관리</DialogTitle>
+                            <DialogContent>
+                                <DialogContentText sx={{ mb: 2 }}>새 편지 작성 시 사용할 기본 정보입니다.</DialogContentText>
+                                <Stack spacing={2} sx={{ mb: 4, mt: 1 }}>
+                                    <TextField size="small" label="프로필 별칭" value={profileForm.name} onChange={e => setProfileForm({ ...profileForm, name: e.target.value })} fullWidth />
+                                    <Stack direction="row" spacing={1}>
+                                        <TextField size="small" label="성명" value={profileForm.senderName} onChange={e => setProfileForm({ ...profileForm, senderName: e.target.value })} fullWidth />
+                                        <TextField size="small" label="직함" value={profileForm.senderRole} onChange={e => setProfileForm({ ...profileForm, senderRole: e.target.value })} fullWidth />
+                                    </Stack>
+                                    <Stack direction="row" spacing={1}>
+                                        <TextField size="small" label="전화번호" value={profileForm.phone} onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })} fullWidth />
+                                        <TextField size="small" label="이메일" value={profileForm.email} onChange={e => setProfileForm({ ...profileForm, email: e.target.value })} fullWidth />
+                                    </Stack>
+                                    <Box>
+                                        <Typography variant="caption" display="block" sx={{ mb: 1 }}>기본 발송 테마</Typography>
+                                        <Stack direction="row" spacing={1} flexWrap="wrap">
+                                            {THEMES.map(t => (
+                                                <Box key={t.id} onClick={() => setProfileForm({ ...profileForm, defaultTheme: t.id })}
+                                                    sx={{
+                                                        width: 32, height: 32, borderRadius: '50%', bgcolor: t.color, cursor: 'pointer',
+                                                        border: profileForm.defaultTheme === t.id ? '2px solid black' : '1px solid transparent',
+                                                        boxShadow: profileForm.defaultTheme === t.id ? '0 0 0 2px white inset' : 'none'
+                                                    }} />
+                                            ))}
+                                        </Stack>
+                                    </Box>
+                                    <Button variant="contained" onClick={saveProfile} disableElevation>저장</Button>
+                                </Stack>
+                                <Divider sx={{ my: 2 }} textItem>목록</Divider>
+                                <List dense>
+                                    {profiles.map(p => (
+                                        <ListItem key={p.id} secondaryAction={
+                                            <Stack direction="row">
+                                                <IconButton onClick={() => setProfileForm(p)}><span className="material-symbols-rounded">edit</span></IconButton>
+                                                <IconButton onClick={(e) => { e.stopPropagation(); deleteProfile(p.id); }} color="error">
+                                                    <span className="material-symbols-rounded">delete</span>
+                                                </IconButton>
+                                            </Stack>
+                                        } sx={{ bgcolor: 'background.paper', mb: 1, borderRadius: 2, border: '1px solid #eee' }}>
+                                            <ListItemText primary={p.name} secondary={`${p.senderName} • ${THEMES.find(t => t.id === p.defaultTheme)?.name || '기본'}`} />
+                                        </ListItem>
+                                    ))}
+                                </List>
+                            </DialogContent>
+                            <DialogActions><Button onClick={() => setOpenProfile(false)}>닫기</Button></DialogActions>
+                        </Dialog>
+
+                        {/* Profile Delete Dialog */}
+                        <Dialog open={!!deleteProfileId} onClose={() => setDeleteProfileId(null)} PaperProps={{ sx: { borderRadius: 7, p: 2 } }}>
+                            <DialogTitle>프로필 삭제</DialogTitle>
+                            <DialogContent>
+                                <DialogContentText>선택한 프로필을 정말 삭제하시겠습니까?</DialogContentText>
+                            </DialogContent>
+                            <DialogActions>
+                                <Button onClick={() => setDeleteProfileId(null)}>취소</Button>
+                                <Button onClick={confirmDeleteProfile} variant="contained" color="error">삭제</Button>
+                            </DialogActions>
+                        </Dialog>
+
+                        {/* Settings Dialog */}
+                        <Dialog open={openSettings} onClose={() => setOpenSettings(false)} fullWidth maxWidth="xs" PaperProps={{ sx: { borderRadius: 7 } }}>
+                            <DialogTitle>설정</DialogTitle>
+                            <DialogContent>
+                                <Typography variant="subtitle2" sx={{ mb: 1 }}>UI 테마 (M3ui)</Typography>
+                                <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mb: 3 }}>
+                                    {THEMES.map(t => (
+                                        <Box key={t.id} onClick={() => changeUiTheme(t.id)}
+                                            sx={{
+                                                width: 40, height: 40, borderRadius: '50%', bgcolor: t.color, cursor: 'pointer',
+                                                border: uiThemeId === t.id ? '3px solid black' : '1px solid transparent',
+                                                boxShadow: uiThemeId === t.id ? '0 0 0 2px white inset' : 'none', mb: 1
+                                            }} />
+                                    ))}
+                                </Stack>
+                                <Divider sx={{ mb: 2 }} />
+                                <Typography variant="subtitle2" sx={{ mb: 1 }}>데이터 관리</Typography>
+                                <Stack spacing={1}>
+                                    <Button variant="outlined" startIcon={<span className="material-symbols-rounded">download</span>} onClick={exportAll}>
+                                        전체 백업 (JSON)
+                                    </Button>
+                                    <Button variant="outlined" startIcon={<span className="material-symbols-rounded">upload</span>} onClick={() => fileInputRef.current.click()}>
+                                        데이터 복원
+                                    </Button>
+                                    <input type="file" ref={fileInputRef} hidden accept=".json" onChange={importAll} />
+                                </Stack>
+                            </DialogContent>
+                            <DialogActions><Button onClick={() => setOpenSettings(false)}>닫기</Button></DialogActions>
+                        </Dialog>
+
+                        {!isDesktop && <Fab color="primary" variant="extended" sx={{ position: 'fixed', bottom: 100, right: 16, borderRadius: '16px' }} onClick={() => goWrite()}><span className="material-symbols-rounded" style={{ marginRight: 8 }}>edit</span>작성</Fab>}
+                        <Snackbar open={snackbar.open} autoHideDuration={3000} onClose={() => setSnackbar({ ...snackbar, open: false })} message={snackbar.message} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
+
+                        {/* QR Dialog */}
+                        <Dialog open={openQr} onClose={closeQr} fullWidth maxWidth="xs" PaperProps={{ sx: { borderRadius: 7, overflow: 'hidden' } }}>
+                            <DialogTitle sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', bgcolor: 'black', color: 'white' }}>
+                                QR 스캔
+                                <IconButton onClick={closeQr} sx={{ color: 'white' }}><span className="material-symbols-rounded">close</span></IconButton>
+                            </DialogTitle>
+                            <Box sx={{ bgcolor: 'black', height: 350, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <div id="reader" style={{ width: '100%', height: '100%' }}></div>
+                            </Box>
+                            <Box sx={{ p: 2, textAlign: 'center', bgcolor: '#f0f0f0' }}>
+                                <Typography variant="caption" color="text.secondary">카메라 권한을 허용해주세요.</Typography>
+                            </Box>
                         </Dialog>
                     </Box>
                 </ThemeProvider>

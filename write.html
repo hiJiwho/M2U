@@ -507,11 +507,54 @@
                     const groups = {}; // For Batch Mode
 
                     lines.forEach(line => {
-                        const parts = line.split(',');
+                        // Use regex to split by comma but ignore commas inside quotes
+                        // This handles cases where content might have commas "Hello, world"
+                        const parts = line.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || line.split(',');
+                        // Clean quotes from parts if regex was used
+                        const cleanParts = parts.map(p => p.trim().replace(/^"(.*)"$/, '$1').trim());
+
+                        // Simple heuristic: Count non-empty parts
+                        // But split(',') naive approach:
+                        const naiveParts = line.split(',');
+
                         // Check Column Count to distinguish modes
-                        // Case A: Batch Mode (5+ cols) -> Receiver, RecRole, Sender, SenRole, Content
-                        if (parts.length >= 5) {
-                            const [recName, recRole, sendName, sendRole, ...contentParts] = parts;
+                        // Case A: Batch Mode -> Receiver, RecRole, Sender, SenRole, Content (5 items expected)
+                        // Heuristic: If we have at least 4 commas, it's likely Batch Mode.
+                        // OR check if Parts length >= 5.
+                        // Problem: "Sender, Role, Content which has commas" -> split gives > 3 parts.
+
+                        // Better Heuristic: Check if line starts with 5 distinct fields?
+                        // Let's assume Batch Mode MUST have 5 fields.
+                        // Message Mode has 2 or 3.
+
+                        // Let's rely on the Sample CSV format strictly.
+                        // Rolling Sample: Name, Role, Name, Role, Content
+                        // Message Sample: Name, Role, Content
+
+                        // Conflict: A, B, C can be Message Mode (Sender, Role, Content).
+                        // Conflict: A, B, C, D, E can be Batch Mode.
+
+                        // What if Content in Message Mode has 2 commas? A, B, "C, D, E"
+                        // Naive split gives 5 parts.
+                        // So naive split is bad.
+
+                        // Let's use a smarter split for CSV
+                        let row = [];
+                        let current = '';
+                        let inQuote = false;
+                        for (let i = 0; i < line.length; i++) {
+                            const char = line[i];
+                            if (char === '"') { inQuote = !inQuote; }
+                            else if (char === ',' && !inQuote) {
+                                row.push(current.trim());
+                                current = '';
+                            }
+                            else { current += char; }
+                        }
+                        row.push(current.trim());
+
+                        if (row.length >= 5) {
+                            const [recName, recRole, sendName, sendRole, ...contentParts] = row;
                             const content = contentParts.join(',').trim();
 
                             // Grouping Logic
@@ -528,18 +571,17 @@
                                 id: Date.now() + Math.random()
                             });
                         }
-                        // Case B: Message Import Mode (2-3 cols) -> Sender, Role, Content OR Sender, Content
-                        else if (parts.length >= 2) {
+                        else if (row.length >= 2) {
                             let senderName, senderRole, content;
 
-                            if (parts.length >= 3) {
+                            if (row.length >= 3) {
                                 // Sender, Role, Content
-                                [senderName, senderRole, ...contentParts] = parts;
+                                [senderName, senderRole, ...contentParts] = row;
                                 content = contentParts.join(',').trim();
                             } else {
                                 // Sender, Content
-                                senderName = parts[0];
-                                content = parts.slice(1).join(',').trim();
+                                senderName = row[0];
+                                content = row.slice(1).join(',').trim();
                                 senderRole = '';
                             }
 

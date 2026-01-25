@@ -475,12 +475,14 @@
                         QRCode.toCanvas(qrRef.current, url, { width: 220, margin: 2 }, (err) => {
                             if (err) {
                                 console.warn("QR Generation error:", err);
+                                window._qrFailed = true;
                                 if (!isFallback) {
-                                    window._qrFailed = true;
                                     // If we already have resultUrl (short), try it
                                     if (resultUrl && resultUrl !== 'FAILED') {
                                         generateQR(resultUrl, true);
                                     }
+                                } else {
+                                    setQrFallback(true);
                                 }
                             } else {
                                 window._qrFailed = false;
@@ -489,6 +491,16 @@
                         });
                     }
                 }, 100);
+            };
+
+            const copyToClipboard = async (text) => {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    setSnackbar({ open: true, message: '링크가 복사되었습니다.' });
+                } catch (err) {
+                    console.error('Failed to copy: ', err);
+                    setSnackbar({ open: true, message: '복사 실패' });
+                }
             };
 
             // CSV Logic

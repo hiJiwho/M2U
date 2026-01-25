@@ -531,10 +531,10 @@
                         for (const key of groupKeys) {
                             const group = groups[key];
                             const rollingData = {
-                                ...form,
+                                ...form, // Includes current subject, theme, senderName (group name)
                                 receiverName: group.name, // Origin Name
                                 receiverRole: group.role, // Origin Role
-                                content: `${group.msgs.length}개의 메시지`,
+                                content: form.content || `${group.msgs.length}개의 메시지`,
                                 messages: JSON.stringify(group.msgs),
                                 mailbox: ['sent'],
                                 date: new Date().toLocaleDateString()
@@ -546,6 +546,7 @@
                             newResults.push({ name: group.name, url });
                         }
                         setMultiResults(newResults);
+                        setOriginUrl(newResults[0].url);
                         setResultUrl(newResults[0].url);
                         generateQR(newResults[0].url);
                     }
@@ -588,10 +589,15 @@
                                 <Button size="small" variant="text" startIcon={<span className="material-symbols-rounded">help</span>} onClick={() => setOpenVarGuide(true)}>
                                     변수 도움말
                                 </Button>
-                                <Button component="label" size="small" variant="outlined" startIcon={<span className="material-symbols-rounded">upload_file</span>}>
-                                    CSV 업로드
-                                    <input type="file" accept=".csv" hidden onChange={handleCsvUpload} />
-                                </Button>
+                                <Box sx={{ textAlign: 'right' }}>
+                                    <Button component="label" size="small" variant="outlined" startIcon={<span className="material-symbols-rounded">upload_file</span>}>
+                                        CSV 업로드
+                                        <input type="file" accept=".csv" hidden onChange={handleCsvUpload} />
+                                    </Button>
+                                    <Typography variant="caption" display="block" color="text.secondary" sx={{ mt: 0.5 }}>
+                                        ※ 업로드 전 <strong>테마, 제목, 그룹명</strong>을 먼저 설정해주세요.
+                                    </Typography>
+                                </Box>
                             </Box>
 
                             <Stack spacing={3}>
@@ -659,7 +665,7 @@
                                     />
                                 )}
 
-                                {mode !== 'rolling' && (
+                                {mode !== 'rolling' ? (
                                     <Stack spacing={2}>
                                         <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
                                             <TextField label="보낸사람 (이름)" name="senderName" value={form.senderName} onChange={handleChange} sx={{ flex: 1 }} />
@@ -675,6 +681,14 @@
                                             )}
                                         </Stack>
                                     </Stack>
+                                ) : (
+                                    <TextField
+                                        label="보내는 그룹명 (예: 1학년 45반 학생들)"
+                                        name="senderName"
+                                        value={form.senderName}
+                                        onChange={handleChange}
+                                        placeholder="편지 하단 '보낸이' 자리에 표시됩니다."
+                                    />
                                 )}
 
                                 {mode !== 'rolling' && (

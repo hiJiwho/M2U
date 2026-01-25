@@ -335,7 +335,7 @@
                 if (!data.messages) {
                     document.getElementById('letter-sender').innerText = `보낸이: ${data.senderName} ${data.senderRole}`;
                 } else {
-                    document.getElementById('letter-sender').innerText = `롤링페이퍼 (${JSON.parse(data.messages).length}명)`;
+                    document.getElementById('letter-sender').innerText = data.senderName ? `보낸이: ${data.senderName}` : `롤링페이퍼 (${JSON.parse(data.messages).length}명)`;
                 }
             }
         })();

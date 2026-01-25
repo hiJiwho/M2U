@@ -237,7 +237,16 @@
                                         <span className="material-symbols-rounded" style={{ fontSize: 40 }}>mail</span>
                                     </Avatar>
                                     <Typography variant="headlineSmall" component="h2" sx={{ fontWeight: 400, fontSize: '1.5rem', color: '#FFFFFF' }}>편지가 도착했습니다!</Typography>
-                                    <Typography variant="body2" sx={{ opacity: 0.9, mt: 0.5, color: 'rgba(255, 255, 255, 0.8)' }}>보낸이: <span style={{ fontWeight: 600 }}>{data.senderName}</span> {data.senderRole && <span style={{ fontSize: '0.8em', opacity: 0.8 }}>({data.senderRole})</span>}</Typography>
+                                    <Typography variant="body2" sx={{ opacity: 0.9, mt: 0.5, color: 'rgba(255, 255, 255, 0.8)' }}>
+                                        보낸이: {data.senderName ? (
+                                            <>
+                                                <span style={{ fontWeight: 600 }}>{data.senderName}</span>
+                                                {data.senderRole && <span style={{ fontSize: '0.8em', opacity: 0.8 }}>({data.senderRole})</span>}
+                                            </>
+                                        ) : (
+                                            data.messages ? <span style={{ fontWeight: 600 }}>롤링페이퍼 ({JSON.parse(data.messages).length}명)</span> : <span style={{ fontWeight: 600 }}>익명</span>
+                                        )}
+                                    </Typography>
 
                                     <IconButton
                                         sx={{ position: 'absolute', top: 8, right: 8, color: 'white' }}

@@ -361,7 +361,11 @@
 
                     const results = [];
                     for (const name of names) {
-                        const specificForm = { ...form, receiverName: name };
+                        // Look up role from CSV import if exists
+                        const csvEntry = (window._csvReceivers || []).find(r => r.name === name);
+                        const role = csvEntry ? csvEntry.role : (form.receiverRole || '');
+
+                        const specificForm = { ...form, receiverName: name, receiverRole: role };
                         const id = await window.LetterDB.generateID(specificForm); // specific ID per receiver
                         const finalData = { ...specificForm, id, mailbox: ['sent'], date: new Date().toLocaleDateString() };
                         await window.LetterDB.save(finalData);
@@ -449,42 +453,70 @@
 
                 if (mode === 'multi') {
                     const newReceivers = [];
-                    const results = [];
+                    const receiversWithRoles = []; // Store name and role pairs
 
                     for (const line of lines) {
                         const parts = line.split(',');
                         const name = parts[0]?.trim();
-                        if (name) newReceivers.push(name);
+                        const role = parts[1]?.trim() || '';
+                        if (name) {
+                            newReceivers.push(name);
+                            receiversWithRoles.push({ name, role });
+                        }
                     }
+
+                    // Store the role-mapped receivers for the submission logic
+                    window._csvReceivers = receiversWithRoles;
                     setForm(prev => ({ ...prev, receivers: newReceivers.join(', ') }));
                     alert(`${newReceivers.length}명의 수신자를 불러왔습니다. 내용 작성 후 전송을 눌러주세요.`);
-
                 } else if (mode === 'rolling') {
                     // Start Smart Grouping Logic
-                    // Format: [Name, Sender, Content]
+                    // Format: [ReceiverName, ReceiverRole, SenderName, SenderRole, Content]
 
-                    const groups = {}; // Key: NormalizedName, Value: { name: OriginalName, msgs: [] }
+                    const groups = {}; // Key: NormalizedName, Value: { name: OriginalName, role: OriginalRole, msgs: [] }
 
                     lines.forEach(line => {
                         const parts = line.split(',');
-                        if (parts.length < 2) return;
+                        // Minimal parsing: at least 2 parts (ReceiverName, Content) if we use legacy, 
+                        // but let's support: ReceiverName, ReceiverRole, SenderName, SenderRole, Content
 
-                        const receiverName = parts[0].trim();
-                        const senderName = parts[1].trim(); // Msg Sender
-                        const content = parts.slice(2).join(',').trim(); // Rest is content
+                        let receiverName, receiverRole, senderName, senderRole, content;
+
+                        if (parts.length >= 5) {
+                            [receiverName, receiverRole, senderName, senderRole, ...contentParts] = parts;
+                            content = contentParts.join(',').trim();
+                        } else if (parts.length === 3) {
+                            // Legacy-ish fallback: ReceiverName, SenderName, Content
+                            [receiverName, senderName, ...contentParts] = parts;
+                            content = contentParts.join(',').trim();
+                            receiverRole = '';
+                            senderRole = '';
+                        } else {
+                            // Minimal: ReceiverName, Content
+                            receiverName = parts[0];
+                            content = parts.slice(1).join(',').trim();
+                            receiverRole = '';
+                            senderName = 'Anonymous';
+                            senderRole = '';
+                        }
+
+                        receiverName = receiverName?.trim();
+                        receiverRole = receiverRole?.trim();
+                        senderName = senderName?.trim();
+                        senderRole = senderRole?.trim();
 
                         if (!receiverName || !content) return;
 
-                        // Normalize Key: Remove specials, keep Korean if exists
+                        // Normalize Key: Remove specials
                         let key = receiverName.replace(/[^가-힣a-zA-Z0-9]/g, '');
                         if (/[가-힣]/.test(key)) key = key.replace(/[a-zA-Z]/g, '');
 
                         if (!groups[key]) {
-                            groups[key] = { name: receiverName, msgs: [] };
+                            groups[key] = { name: receiverName, role: receiverRole, msgs: [] };
                         }
                         groups[key].msgs.push({
                             senderName: senderName || 'Anonymous',
-                            senderRole: '',
+                            senderRole: senderRole || '',
                             content: content,
                             id: Date.now() + Math.random()
                         });
@@ -501,6 +533,7 @@
                             const rollingData = {
                                 ...form,
                                 receiverName: group.name, // Origin Name
+                                receiverRole: group.role, // Origin Role
                                 content: `${group.msgs.length}개의 메시지`,
                                 messages: JSON.stringify(group.msgs),
                                 mailbox: ['sent'],
@@ -870,27 +903,22 @@
                             {guideTab === 1 && (
                                 <Box>
                                     <Typography variant="subtitle1" gutterBottom>CSV 파일 규칙</Typography>
-                                    <Typography variant="body2" sx={{ mb: 2 }}>
-                                        엑셀에서 작업 후 <strong>.csv (쉼표로 분리)</strong> 형식으로 저장하세요.
-                                    </Typography>
-
-                                    <Typography variant="subtitle2" color="primary">Case A: 다수 발송 모드</Typography>
-                                    <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#fafafa', fontFamily: 'monospace' }}>
-                                        홍길동<br />
-                                        김철수<br />
-                                        이영희
-                                    </Paper>
-                                    <Typography variant="caption" display="block" sx={{ mb: 2 }}>첫 번째 열에 이름만 입력하면 됩니다.</Typography>
-
-                                    <Typography variant="subtitle2" color="secondary">Case B: 롤링페이퍼 모드 (스마트 그룹)</Typography>
-                                    <Paper variant="outlined" sx={{ p: 2, mb: 2, bgcolor: '#fafafa', fontFamily: 'monospace' }}>
-                                        선생님, 제자1, 감사합니다!<br />
-                                        선생님, 제자2, 존경합니다.<br />
-                                        팀장님, 김대리, 생신 축하드려요.
-                                    </Paper>
-                                    <Typography variant="caption" display="block">
-                                        <strong>순서: 받는사람, 보낸사람, 내용</strong><br />
-                                        받는사람 이름이 같으면 자동으로 하나의 롤링페이퍼로 묶입니다.
+                                    <Typography variant="body2" component="div" sx={{ bgcolor: 'surfaceVariant.main', color: 'surfaceVariant.onMain', p: 3, borderRadius: 4, mt: 2, border: '1px solid rgba(0,0,0,0.05)' }}>
+                                        <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 700, color: 'primary.main' }}>1. 다수 발송 모드 CSV (Name, Role)</Typography>
+                                        <Box sx={{ bgcolor: 'white', p: 1.5, borderRadius: 2, mb: 2, fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                                            홍길동, 대리<br />
+                                            김철수, 과장<br />
+                                            이영희, 팀장
+                                        </Box>
+                                        <Typography variant="subtitle2" gutterBottom sx={{ fontWeight: 700, color: 'primary.main' }}>2. 롤링페이퍼 모드 CSV (Receiver, Rec-Role, Sender, Sen-Role, Content)</Typography>
+                                        <Box sx={{ bgcolor: 'white', p: 1.5, borderRadius: 2, fontFamily: 'monospace', fontSize: '0.85rem' }}>
+                                            홍길동, 대리, 이영희, 팀장, 생일 축하해요!<br />
+                                            홍길동, 대리, 박지성, 사원, 늘 감사합니다.<br />
+                                            김철수, 과장, 이영희, 팀장, 수고하셨습니다.
+                                        </Box>
+                                        <Typography variant="caption" display="block" sx={{ mt: 2, color: 'text.secondary' }}>
+                                            ※ 받는 사람(Receiver)이 같으면 자동으로 하나의 롤링페이퍼로 그룹화됩니다.
+                                        </Typography>
                                     </Typography>
                                 </Box>
                             )}

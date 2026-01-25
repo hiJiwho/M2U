@@ -576,8 +576,10 @@
 
                             if (row.length >= 3) {
                                 // Sender, Role, Content
-                                [senderName, senderRole, ...contentParts] = row;
-                                content = contentParts.join(',').trim();
+                                const [sName, sRole, ...cParts] = row;
+                                senderName = sName;
+                                senderRole = sRole;
+                                content = cParts.join(',').trim();
                             } else {
                                 // Sender, Content
                                 senderName = row[0];

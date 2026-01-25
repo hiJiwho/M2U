@@ -68,6 +68,7 @@
             const [resultUrl, setResultUrl] = useState('');
             const [originUrl, setOriginUrl] = useState('');
             const [multiResults, setMultiResults] = useState([]); // [{ name, url }]
+            const [csvData, setCsvData] = useState(null); // { type: 'rolling', groups: {} }
 
             // Autocomplete State
             const [anchorEl, setAnchorEl] = useState(null);
@@ -378,19 +379,48 @@
                     // No Auto Shorten
 
                 } else if (mode === 'rolling') {
-                    if (!form.receiverName) return alert('받는사람을 입력해주세요.');
-                    if (form.messages.length === 0) return alert('메시지를 하나 이상 추가해주세요.');
+                    // Check if we have PENDING CSV data
+                    if (csvData && csvData.type === 'rolling' && Object.keys(csvData.groups).length > 0) {
+                        const groupKeys = Object.keys(csvData.groups);
+                        const newResults = [];
+                        for (const key of groupKeys) {
+                            const group = csvData.groups[key];
+                            const rollingData = {
+                                ...form, // Uses CURRENT form state (Theme, Subject, GroupName)
+                                receiverName: group.name,
+                                receiverRole: group.role,
+                                content: form.content || `${group.msgs.length}개의 메시지`,
+                                messages: JSON.stringify(group.msgs),
+                                mailbox: ['sent'],
+                                date: new Date().toLocaleDateString()
+                            };
+                            const id = await window.LetterDB.generateID(rollingData);
+                            const finalData = { ...rollingData, id };
+                            await window.LetterDB.save(finalData);
+                            const url = window.LetterDB.toUrl(finalData, 'view.html');
+                            newResults.push({ name: group.name, url });
+                        }
+                        setMultiResults(newResults);
+                        if (newResults.length > 0) {
+                            finalUrl = newResults[0].url; // Set one as primary for QR
+                        }
+                        setCsvData(null); // Clear pending data
+                    } else {
+                        // Standard Manual Rolling Paper
+                        if (!form.receiverName) return alert('받는사람을 입력해주세요.');
+                        if (form.messages.length === 0) return alert('메시지를 하나 이상 추가해주세요.');
 
-                    const rollingData = {
-                        ...form,
-                        content: `${form.messages.length}개의 메시지가 담긴 롤링페이퍼입니다.`, // Fallback content
-                        messages: JSON.stringify(form.messages)
-                    };
+                        const rollingData = {
+                            ...form,
+                            content: `${form.messages.length}개의 메시지가 담긴 롤링페이퍼입니다.`, // Fallback content
+                            messages: JSON.stringify(form.messages)
+                        };
 
-                    const id = await window.LetterDB.generateID(rollingData);
-                    const finalData = { ...rollingData, id, mailbox: ['sent'], date: new Date().toLocaleDateString() };
-                    await window.LetterDB.save(finalData);
-                    finalUrl = window.LetterDB.toUrl(finalData, 'view.html');
+                        const id = await window.LetterDB.generateID(rollingData);
+                        const finalData = { ...rollingData, id, mailbox: ['sent'], date: new Date().toLocaleDateString() };
+                        await window.LetterDB.save(finalData);
+                        finalUrl = window.LetterDB.toUrl(finalData, 'view.html');
+                    }
                 }
 
                 if (finalUrl) {
@@ -473,82 +503,73 @@
                     // Start Smart Grouping Logic
                     // Format: [ReceiverName, ReceiverRole, SenderName, SenderRole, Content]
 
-                    const groups = {}; // Key: NormalizedName, Value: { name: OriginalName, role: OriginalRole, msgs: [] }
+                    const newMessages = [];
+                    const groups = {}; // For Batch Mode
 
                     lines.forEach(line => {
                         const parts = line.split(',');
-                        // Minimal parsing: at least 2 parts (ReceiverName, Content) if we use legacy, 
-                        // but let's support: ReceiverName, ReceiverRole, SenderName, SenderRole, Content
-
-                        let receiverName, receiverRole, senderName, senderRole, content;
-
+                        // Check Column Count to distinguish modes
+                        // Case A: Batch Mode (5+ cols) -> Receiver, RecRole, Sender, SenRole, Content
                         if (parts.length >= 5) {
-                            [receiverName, receiverRole, senderName, senderRole, ...contentParts] = parts;
-                            content = contentParts.join(',').trim();
-                        } else if (parts.length === 3) {
-                            // Legacy-ish fallback: ReceiverName, SenderName, Content
-                            [receiverName, senderName, ...contentParts] = parts;
-                            content = contentParts.join(',').trim();
-                            receiverRole = '';
-                            senderRole = '';
-                        } else {
-                            // Minimal: ReceiverName, Content
-                            receiverName = parts[0];
-                            content = parts.slice(1).join(',').trim();
-                            receiverRole = '';
-                            senderName = 'Anonymous';
-                            senderRole = '';
+                            const [recName, recRole, sendName, sendRole, ...contentParts] = parts;
+                            const content = contentParts.join(',').trim();
+
+                            // Grouping Logic
+                            let key = recName.trim().replace(/[^가-힣a-zA-Z0-9]/g, '');
+                            if (/[가-힣]/.test(key)) key = key.replace(/[a-zA-Z]/g, '');
+
+                            if (!groups[key]) {
+                                groups[key] = { name: recName.trim(), role: recRole.trim(), msgs: [] };
+                            }
+                            groups[key].msgs.push({
+                                senderName: sendName.trim(),
+                                senderRole: sendRole.trim(),
+                                content: content,
+                                id: Date.now() + Math.random()
+                            });
                         }
+                        // Case B: Message Import Mode (2-3 cols) -> Sender, Role, Content OR Sender, Content
+                        else if (parts.length >= 2) {
+                            let senderName, senderRole, content;
 
-                        receiverName = receiverName?.trim();
-                        receiverRole = receiverRole?.trim();
-                        senderName = senderName?.trim();
-                        senderRole = senderRole?.trim();
+                            if (parts.length >= 3) {
+                                // Sender, Role, Content
+                                [senderName, senderRole, ...contentParts] = parts;
+                                content = contentParts.join(',').trim();
+                            } else {
+                                // Sender, Content
+                                senderName = parts[0];
+                                content = parts.slice(1).join(',').trim();
+                                senderRole = '';
+                            }
 
-                        if (!receiverName || !content) return;
-
-                        // Normalize Key: Remove specials
-                        let key = receiverName.replace(/[^가-힣a-zA-Z0-9]/g, '');
-                        if (/[가-힣]/.test(key)) key = key.replace(/[a-zA-Z]/g, '');
-
-                        if (!groups[key]) {
-                            groups[key] = { name: receiverName, role: receiverRole, msgs: [] };
+                            if (senderName && content) {
+                                newMessages.push({
+                                    senderName: senderName.trim(),
+                                    senderRole: senderRole ? senderRole.trim() : '',
+                                    content: content,
+                                    id: Date.now() + Math.random()
+                                });
+                            }
                         }
-                        groups[key].msgs.push({
-                            senderName: senderName || 'Anonymous',
-                            senderRole: senderRole || '',
-                            content: content,
-                            id: Date.now() + Math.random()
-                        });
                     });
 
-                    // Generate Rolling Papers
+                    // Decide Action based on what we found
                     const groupKeys = Object.keys(groups);
-                    if (groupKeys.length === 0) return alert('유효한 CSV 데이터가 없습니다.');
 
-                    if (confirm(`${groupKeys.length}명의 롤링페이퍼 그룹을 발견했습니다. 생성하시겠습니까?`)) {
-                        const newResults = [];
-                        for (const key of groupKeys) {
-                            const group = groups[key];
-                            const rollingData = {
-                                ...form, // Includes current subject, theme, senderName (group name)
-                                receiverName: group.name, // Origin Name
-                                receiverRole: group.role, // Origin Role
-                                content: form.content || `${group.msgs.length}개의 메시지`,
-                                messages: JSON.stringify(group.msgs),
-                                mailbox: ['sent'],
-                                date: new Date().toLocaleDateString()
-                            };
-                            const id = await window.LetterDB.generateID(rollingData);
-                            const finalData = { ...rollingData, id };
-                            await window.LetterDB.save(finalData);
-                            const url = window.LetterDB.toUrl(finalData, 'view.html');
-                            newResults.push({ name: group.name, url });
-                        }
-                        setMultiResults(newResults);
-                        setOriginUrl(newResults[0].url);
-                        setResultUrl(newResults[0].url);
-                        generateQR(newResults[0].url);
+                    if (groupKeys.length > 0) {
+                        // Batch Mode found
+                        setCsvData({ type: 'rolling', groups, count: groupKeys.length });
+                        alert(`${groupKeys.length}개의 롤링페이퍼 그룹을 불러왔습니다.\\n제목, 테마, 그룹명을 설정한 후 '보내기'를 눌러주세요.`);
+                    } else if (newMessages.length > 0) {
+                        // Message Import Mode found
+                        setForm(prev => ({
+                            ...prev,
+                            messages: [...prev.messages, ...newMessages]
+                        }));
+                        alert(`${newMessages.length}개의 메시지가 작성 목록에 추가되었습니다.`);
+                    } else {
+                        alert('유효한 CSV 데이터가 없습니다.');
                     }
                 }
             };
@@ -726,6 +747,17 @@
                                 {mode === 'rolling' && (
                                     <Box sx={{ bgcolor: 'var(--T_surfaceContainer)', p: 2, borderRadius: 2 }}>
                                         <Typography variant="subtitle2" sx={{ mb: 1 }}>메시지 작성 ({form.messages.length}개)</Typography>
+
+                                        {/* CSV Loaded Indicator */}
+                                        {csvData && csvData.type === 'rolling' && (
+                                            <Paper sx={{ p: 2, mb: 2, bgcolor: 'primary.container', color: 'onPrimaryContainer' }}>
+                                                <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>CSV 데이터 대기 중</Typography>
+                                                <Typography variant="body2">{csvData.count}개의 롤링페이퍼 그룹이 전송을 기다리고 있습니다.</Typography>
+                                                <Typography variant="caption">제목, 테마, 그룹명을 설정한 후 '보내기'를 누르면 일괄 생성됩니다.</Typography>
+                                                <Button size="small" color="inherit" onClick={() => setCsvData(null)} sx={{ mt: 1 }}>CSV 취소</Button>
+                                            </Paper>
+                                        )}
+
                                         <Stack spacing={2} sx={{ mb: 2 }}>
                                             {form.messages.map((m, i) => (
                                                 <Paper key={m.id || i} sx={{ p: 1.5, display: 'flex', alignItems: 'center' }}>

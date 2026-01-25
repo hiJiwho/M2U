@@ -37,9 +37,11 @@
             Container, Box, Paper, Typography, TextField, Button,
             Stack, Chip, AppBar, Toolbar, IconButton, Fab,
             Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions,
-            ToggleButton, ToggleButtonGroup, Tab, Tabs, Divider, List, ListItem, ListItemText,
-            Menu, MenuItem, Table, TableBody, TableCell, TableContainer, TableHead, TableRow,
-            Select, FormControl, InputLabel, Snackbar
+            ToggleButton, ToggleButtonGroup, List, ListItem, ListItemText,
+            Menu, MenuItem, Divider,
+            FormControl, InputLabel, Select, CircularProgress,
+            Tabs, Tab, Snackbar,
+            Table, TableHead, TableRow, TableCell, TableBody, TableContainer
         } = MaterialUI;
 
         const THEMES = [
@@ -67,6 +69,7 @@
             const [mode, setMode] = useState('general'); // 'general' | 'multi' | 'rolling'
             const [resultUrl, setResultUrl] = useState('');
             const [originUrl, setOriginUrl] = useState('');
+            const [qrFallback, setQrFallback] = useState(false);
             const [multiResults, setMultiResults] = useState([]); // [{ name, url }]
             const [csvData, setCsvData] = useState(null); // { type: 'rolling', groups: {} }
 
@@ -425,43 +428,66 @@
 
                 if (finalUrl) {
                     setOriginUrl(finalUrl);
-                    setResultUrl(finalUrl);
+                    setResultUrl('');
+                    setQrFallback(false);
                     setMultiResults(finalMultiResults);
-                    if (mode !== 'multi') generateQR(finalUrl);
 
-                    // Auto Shorten URL (Skip for Multi)
-                    if (mode !== 'multi') shortenUrl(finalUrl, finalMultiResults);
+                    // Always try original first
+                    generateQR(finalUrl);
+                    shortenUrl(finalUrl);
 
                     // Clear Draft if exists in localStorage (Legacy/Backup)
-                    if (form.id && form.mailbox === 'draft') {
-                        // We don't delete from IndexedDB here because save() already updated it to 'sent'
+                    if (form.id) {
                         localStorage.removeItem('mail2u_draft');
                     }
+
+                    // Clear URL params (remove draftId)
+                    window.history.replaceState({}, document.title, window.location.pathname);
                 }
             };
 
-            const shortenUrl = async (url, multiRes) => {
-                if (!url) return;
+            const shortenUrl = async (url) => {
+                if (!url) return null;
                 try {
-                    // Shorten Main URL
-                    const res = await fetch(`https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`);
+                    // Use local proxy to bypass CORS
+                    const res = await fetch(`/shorten?url=${encodeURIComponent(url)}`);
                     if (res.ok) {
                         const short = await res.text();
                         setResultUrl(short);
-                    }
-
-                    // Shorten Multi Results (Limit concurrency?)
-                    if (multiRes && multiRes.length > 0) {
-                        // Skip auto-shortening ALL multi-results to avoid spamming API.
+                        // If original QR failed, retry with short URL
+                        if (window._qrFailed) {
+                            generateQR(short, true);
+                        }
+                        return short;
                     }
                 } catch (e) {
-                    console.error("Auto Shorten Failed", e);
+                    console.error("Shorten Failed", e);
                 }
+                // If it fails, we still have originUrl
+                setResultUrl('FAILED');
+                return null;
             };
 
-            const generateQR = (url) => {
+            const generateQR = (url, isFallback = false) => {
+                if (!url) return;
                 setTimeout(() => {
-                    if (qrRef.current) QRCode.toCanvas(qrRef.current, url, { width: 200, margin: 2 });
+                    if (qrRef.current) {
+                        QRCode.toCanvas(qrRef.current, url, { width: 220, margin: 2 }, (err) => {
+                            if (err) {
+                                console.warn("QR Generation error:", err);
+                                if (!isFallback) {
+                                    window._qrFailed = true;
+                                    // If we already have resultUrl (short), try it
+                                    if (resultUrl && resultUrl !== 'FAILED') {
+                                        generateQR(resultUrl, true);
+                                    }
+                                }
+                            } else {
+                                window._qrFailed = false;
+                                setQrFallback(isFallback);
+                            }
+                        });
+                    }
                 }, 100);
             };
 
@@ -853,18 +879,49 @@
                             </Box>
 
                             <Stack spacing={2} sx={{ width: '100%', mb: 4 }}>
-                                {resultUrl && resultUrl !== originUrl && (
-                                    <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
-                                        <Typography variant="caption" color="primary" sx={{ fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 }}>단축 URL</Typography>
-                                        <Typography variant="body2" sx={{ wordBreak: 'break-all', mt: 0.5, fontFamily: 'monospace' }}>{resultUrl}</Typography>
-                                        <Button fullWidth size="small" variant="tonal" sx={{ mt: 1.5, borderRadius: 12 }} onClick={() => { navigator.clipboard.writeText(resultUrl); alert('복사되었습니다.'); }}>단축 링크 복사</Button>
-                                    </Box>
+                                <Button
+                                    fullWidth
+                                    variant="outlined"
+                                    color="secondary"
+                                    startIcon={<span className="material-symbols-rounded">link</span>}
+                                    sx={{ height: 48, borderRadius: 12 }}
+                                    onClick={() => { navigator.clipboard.writeText(originUrl); alert('원본 링크가 복사되었습니다.'); }}
+                                >
+                                    원본 링크 복사
+                                </Button>
+
+                                {resultUrl ? (
+                                    resultUrl !== 'FAILED' ? (
+                                        <Button
+                                            fullWidth
+                                            variant="contained"
+                                            color="primary"
+                                            startIcon={<span className="material-symbols-rounded">content_copy</span>}
+                                            sx={{ height: 48, borderRadius: 12, fontWeight: 700 }}
+                                            onClick={() => { navigator.clipboard.writeText(resultUrl); alert('단축 링크가 복사되었습니다.'); }}
+                                        >
+                                            단축 링크 복사
+                                        </Button>
+                                    ) : (
+                                        <Typography variant="caption" color="error" align="center">단축 링크 생성에 실패했습니다.</Typography>
+                                    )
+                                ) : (
+                                    <Button
+                                        fullWidth
+                                        disabled
+                                        variant="contained"
+                                        sx={{ height: 48, borderRadius: 12, opacity: 0.7 }}
+                                    >
+                                        <CircularProgress size={20} sx={{ mr: 1 }} color="inherit" />
+                                        단축 링크 생성 중...
+                                    </Button>
                                 )}
-                                <Box sx={{ p: 2, bgcolor: 'background.default', borderRadius: 3, border: '1px solid', borderColor: 'divider' }}>
-                                    <Typography variant="caption" color="secondary" sx={{ fontWeight: 800, textTransform: 'uppercase', letterSpacing: 1 }}>원본 URL (QR 연결됨)</Typography>
-                                    <Typography variant="body2" sx={{ wordBreak: 'break-all', mt: 0.5, fontSize: '0.75rem', opacity: 0.7, fontFamily: 'monospace' }}>{originUrl}</Typography>
-                                    <Button fullWidth size="small" variant="text" sx={{ mt: 1, borderRadius: 12 }} onClick={() => { navigator.clipboard.writeText(originUrl); alert('복사되었습니다.'); }}>원본 링크 복사</Button>
-                                </Box>
+
+                                {qrFallback && (
+                                    <Typography variant="caption" color="error" align="center" sx={{ display: 'block', mt: 1, fontWeight: 700 }}>
+                                        원본 주소가 너무 길어 단축 주소로 QR코드를 생성했습니다.
+                                    </Typography>
+                                )}
                             </Stack>
 
                             {multiResults.length > 0 && (

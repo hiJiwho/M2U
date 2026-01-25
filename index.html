@@ -204,18 +204,8 @@
             }).sort((a, b) => new Date(b.updatedAt || b.date) - new Date(a.updatedAt || a.date));
 
             const handleDelete = async () => {
-                const target = letters.find(l => l.id === deleteId);
-                if (target) {
-                    const currentTabTag = tab === 0 ? 'inbox' : (tab === 1 ? 'sent' : 'draft');
-                    const newTags = target.mailbox.filter(M => M !== currentTabTag);
-
-                    if (newTags.length === 0) {
-                        // No tags left, completely delete
-                        await window.LetterDB.delete(deleteId);
-                    } else {
-                        // Update tags
-                        await window.LetterDB.save({ ...target, mailbox: newTags });
-                    }
+                if (deleteId) {
+                    await window.LetterDB.delete(deleteId);
                 }
                 setDeleteId(null);
                 refresh();

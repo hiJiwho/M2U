@@ -71,8 +71,11 @@
                     if (hasParams) {
                         d = window.LetterDB.fromUrl();
                         if (d) {
-                            // Always save to inbox on view to ensure persistence and central access
-                            await window.LetterDB.save({ ...d, mailbox: 'inbox', savedAt: new Date().toISOString() });
+                            // Only save to inbox if it doesn't already exist to avoid duplicate entries for sent letters
+                            const exists = await window.LetterDB.exists(d.id);
+                            if (!exists) {
+                                await window.LetterDB.save({ ...d, mailbox: 'inbox', savedAt: new Date().toISOString() });
+                            }
                             sessionStorage.setItem('current_letter', JSON.stringify(d));
                             const cleanUrl = window.location.pathname;
                             window.history.replaceState({}, document.title, cleanUrl);

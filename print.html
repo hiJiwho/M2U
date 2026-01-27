@@ -135,24 +135,32 @@
                 <div style={{
                     width: '100%', height: '100%', boxSizing: 'border-box',
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                    padding: '6%', ...outerStyle
+                    padding: '5%', ...outerStyle
                 }}>
                     <div style={{
                         width: '100%', height: '100%', borderRadius: 16,
                         display: 'grid', gridTemplateRows: 'auto 1fr auto auto',
                         alignItems: 'center', justifyItems: 'center',
-                        padding: '12px 8px', textAlign: 'center',
+                        padding: '16px 12px', textAlign: 'center',
+                        gap: '4px',
                         ...innerStyle
                     }}>
-                        <Typography variant="h6" style={{ fontWeight: 700, fontSize: '1.1rem', marginTop: 4 }}>
+                        <Typography variant="h6" style={{ fontWeight: 700, fontSize: '1rem', whiteSpace: 'nowrap' }}>
                             QR을 스캔하세요
                         </Typography>
 
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', width: '100%' }}>
-                            <img src={qrUrl} style={imgStyle} />
+                        <div style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            height: '100%', width: '100%', minHeight: 0, overflow: 'hidden'
+                        }}>
+                            <img src={qrUrl} style={{
+                                maxHeight: '100%', maxWidth: '85%', objectFit: 'contain',
+                                borderRadius: 8, border: bwMode ? '4px solid black' : '4px solid white',
+                                background: 'white', boxSizing: 'border-box'
+                            }} />
                         </div>
 
-                        <Box sx={{ width: '100%', px: 1, mb: 0.5 }}>
+                        <Box sx={{ width: '100%', px: 1 }}>
                             <Typography variant="body2" style={{ fontWeight: 600, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 제목: {data.subject}
                             </Typography>
@@ -161,7 +169,10 @@
                             </Typography>
                         </Box>
 
-                        <Typography variant="caption" style={{ fontSize: '0.65rem', opacity: 0.8, fontStyle: 'italic', wordBreak: 'break-all', lineHeight: 1.1, marginBottom: 4 }}>
+                        <Typography variant="caption" style={{
+                            fontSize: '0.6rem', opacity: 0.8, fontStyle: 'italic',
+                            wordBreak: 'break-all', lineHeight: 1, marginTop: 4
+                        }}>
                             {data.shortUrl || 'is.gd/M2U...'}
                         </Typography>
                     </div>
@@ -178,33 +189,61 @@
 
             useEffect(() => {
                 const load = async () => {
-                    // Load selected IDs from URL param or LocalStorage?
-                    // For now, let's assume localStorage 'print_queue'
-                    const queue = JSON.parse(localStorage.getItem('mail2u_print_queue') || '[]');
-                    const allData = await window.LetterDB.getAll();
-                    let targets = [];
-                    if (queue.length > 0) {
-                        targets = allData.filter(l => queue.includes(l.id));
-                    } else {
-                        // Fallback: Use last 8 sent letters
-                        targets = allData.filter(l => l.mailbox.includes('sent')).slice(0, 8);
-                    }
-                    setLetters(targets);
+                    try {
+                        // Load selected IDs from URL param or LocalStorage?
+                        // For now, let's assume localStorage 'print_queue'
+                        const queueStr = localStorage.getItem('mail2u_print_queue');
+                        const queue = queueStr ? JSON.parse(queueStr) : [];
+                        const allData = await window.LetterDB.getAll();
 
-                    // Generate QRs
-                    const urls = {};
-                    for (const l of targets) {
-                        let url = window.LetterDB.toUrl(l, 'view.html');
+                        let targets = [];
+                        if (queue && queue.length > 0) {
+                            targets = allData.filter(l => queue.includes(l.id));
+                        } else {
+                            // Fallback: Use last 8 sent letters
+                            targets = allData.filter(l => l.mailbox && l.mailbox.includes('sent')).slice(0, 8);
+                        }
+                        setLetters(targets);
 
-                        // Apply rolling paper QR logic: Use shortUrl if it's a rolling paper
-                        const isRollingPaper = l.messages && (typeof l.messages === 'string' ? JSON.parse(l.messages).length > 0 : l.messages.length > 0);
-                        if (isRollingPaper && l.shortUrl) {
-                            url = l.shortUrl;
+                        // Generate QRs
+                        if (!window.QRCode) {
+                            console.error("QRCode library not loaded");
+                            return;
                         }
 
-                        urls[l.id] = await QRCode.toDataURL(url, { margin: 1 });
+                        const urls = {};
+                        for (const l of targets) {
+                            try {
+                                let url = window.LetterDB.toUrl(l, 'view.html');
+
+                                // Apply rolling paper QR logic: Use shortUrl if it's a rolling paper
+                                let isRollingPaper = false;
+                                try {
+                                    if (l.messages) {
+                                        isRollingPaper = typeof l.messages === 'string'
+                                            ? JSON.parse(l.messages).length > 0
+                                            : l.messages.length > 0;
+                                    }
+                                } catch (e) {
+                                    console.warn("Failed to parse messages for letter", l.id, e);
+                                    // Treat as not rolling paper if parse fails
+                                }
+
+                                if (isRollingPaper && l.shortUrl) {
+                                    url = l.shortUrl;
+                                }
+
+                                urls[l.id] = await QRCode.toDataURL(url, { margin: 1 });
+                            } catch (err) {
+                                console.error("Failed to generate QR for letter", l.id, err);
+                                // Optional: Set a placeholder or error image?
+                                // urls[l.id] = ""; 
+                            }
+                        }
+                        setQrUrls(urls);
+                    } catch (e) {
+                        console.error("Global error in load effect:", e);
                     }
-                    setQrUrls(urls);
                 };
                 load();
             }, []);

@@ -434,7 +434,22 @@
 
                     // Always try original first
                     generateQR(finalUrl);
-                    shortenUrl(finalUrl);
+
+                    // IMPORTANT: Use the ID of the record we just saved
+                    // For batch modes, we'd need to shorten all, but for now we focus on the primary one
+                    const targetId = (mode === 'multi' || (mode === 'rolling' && multiResults.length > 0))
+                        ? null // For multi/batch, shortening is more complex, skip for now or handle separately
+                        : (finalData && finalData.id) || form.id;
+
+                    if (targetId) {
+                        shortenUrl(finalUrl, 0, targetId);
+                    } else if (mode === 'multi' || mode === 'rolling') {
+                        // If we have results, shorten the first one at least
+                        const firstResult = (multiResults && multiResults.length > 0) ? multiResults[0] : null;
+                        // Actually in batch mode, multiResults is set in state but not yet available here
+                        // We would need to pass it differently. 
+                        // But for manual rolling paper, targetId is correctly identified above.
+                    }
 
                     // Clear Draft if exists in localStorage (Legacy/Backup)
                     if (form.id) {
@@ -455,18 +470,27 @@
                 return result;
             };
 
-            const shortenUrl = async (url, retryCount = 0) => {
+            const shortenUrl = async (url, retryCount = 0, targetId = null) => {
                 if (!url) return null;
+                const recordId = targetId || form.id;
 
                 // Handle localhost URLs by mocking
                 if (url.includes('localhost') || url.includes('127.0.0.1')) {
                     const mock = `https://is.gd/M2U${generateRandomString(4)}`;
                     setResultUrl(mock);
                     if (window._qrFailed) generateQR(mock, true);
+
+                    // Save mock to DB too if targetId exists
+                    if (recordId) {
+                        try {
+                            const current = await window.LetterDB.get(recordId);
+                            if (current) await window.LetterDB.save({ ...current, shortUrl: mock });
+                        } catch (e) { }
+                    }
                     return mock;
                 }
 
-                const customName = `M2U${generateRandomString(3 + retryCount)}`; // Increase length on retry
+                const customName = `M2U${generateRandomString(3 + retryCount)}`;
 
                 return new Promise((resolve) => {
                     const callbackName = 'isgd_callback_' + Math.floor(Math.random() * 1000000);
@@ -479,11 +503,13 @@
                             setResultUrl(data.shorturl);
                             if (window._qrFailed) generateQR(data.shorturl, true);
 
-                            // Update Form State and Save short URL back to DB record
-                            if (form.id) {
+                            // Update Form State (for UI feedback)
+                            setForm(prev => ({ ...prev, shortUrl: data.shorturl }));
+
+                            // Save short URL back to specific letter record
+                            if (recordId) {
                                 try {
-                                    setForm(prev => ({ ...prev, shortUrl: data.shorturl }));
-                                    const currentLetter = await window.LetterDB.get(form.id);
+                                    const currentLetter = await window.LetterDB.get(recordId);
                                     if (currentLetter) {
                                         await window.LetterDB.save({ ...currentLetter, shortUrl: data.shorturl });
                                     }
@@ -492,9 +518,8 @@
 
                             resolve(data.shorturl);
                         } else if (data.errorcode === 1 && retryCount < 5) {
-                            // Error code 1 usually means short URL is already taken
                             console.warn(`Short URL collision for ${customName}, retrying...`);
-                            resolve(await shortenUrl(url, retryCount + 1));
+                            resolve(await shortenUrl(url, retryCount + 1, recordId));
                         } else {
                             console.error("Shorten Error:", data.errormessage || data.errorcode);
                             setResultUrl('FAILED');
@@ -513,7 +538,6 @@
                     };
                     document.body.appendChild(script);
 
-                    // Timeout handling
                     setTimeout(() => {
                         if (window[callbackName]) {
                             delete window[callbackName];
@@ -521,7 +545,7 @@
                             setResultUrl('FAILED');
                             resolve(null);
                         }
-                    }, 8000);
+                    }, 10000);
                 });
             };
 

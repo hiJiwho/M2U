@@ -126,9 +126,9 @@
             };
 
             const imgStyle = bwMode ? {
-                width: '50%', borderRadius: 8, marginBottom: 12, border: '4px solid black', background: 'white'
+                width: '45%', borderRadius: 8, marginBottom: 8, border: '4px solid black', background: 'white'
             } : {
-                width: '50%', borderRadius: 8, marginBottom: 12, border: '4px solid white', background: 'white'
+                width: '45%', borderRadius: 8, marginBottom: 8, border: '4px solid white', background: 'white'
             };
 
             return (
@@ -140,25 +140,25 @@
                     <div style={{
                         width: '100%', height: '100%', borderRadius: 16,
                         display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                        padding: 16, textAlign: 'center',
+                        padding: 12, textAlign: 'center',
                         ...innerStyle
                     }}>
-                        <Typography variant="h6" style={{ fontWeight: 700, marginBottom: 16, fontSize: '1.2rem' }}>
+                        <Typography variant="h6" style={{ fontWeight: 700, marginBottom: 8, fontSize: '1.1rem' }}>
                             QR을 스캔하세요
                         </Typography>
 
                         <img src={qrUrl} style={imgStyle} />
 
-                        <Box sx={{ mt: 1, width: '100%', px: 2 }}>
-                            <Typography variant="body2" style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <Box sx={{ mt: 0.5, width: '100%', px: 1 }}>
+                            <Typography variant="body2" style={{ fontWeight: 600, fontSize: '0.85rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 제목: {data.subject}
                             </Typography>
-                            <Typography variant="caption" style={{ display: 'block', opacity: 0.9 }}>
+                            <Typography variant="caption" style={{ display: 'block', fontSize: '0.75rem', opacity: 0.9 }}>
                                 보낸 이: {data.senderName}
                             </Typography>
                         </Box>
 
-                        <Typography variant="caption" style={{ marginTop: 12, opacity: 0.8, fontStyle: 'italic', wordBreak: 'break-all' }}>
+                        <Typography variant="caption" style={{ marginTop: 8, fontSize: '0.7rem', opacity: 0.8, fontStyle: 'italic', wordBreak: 'break-all', lineHeight: 1.2 }}>
                             {data.shortUrl || 'is.gd/M2U...'}
                         </Typography>
                     </div>
@@ -184,14 +184,21 @@
                         targets = allData.filter(l => queue.includes(l.id));
                     } else {
                         // Fallback: Use last 8 sent letters
-                        targets = allData.filter(l => l.mailbox === 'sent').slice(0, 8);
+                        targets = allData.filter(l => l.mailbox.includes('sent')).slice(0, 8);
                     }
                     setLetters(targets);
 
                     // Generate QRs
                     const urls = {};
                     for (const l of targets) {
-                        const url = window.LetterDB.toUrl(l, 'view.html');
+                        let url = window.LetterDB.toUrl(l, 'view.html');
+
+                        // Apply rolling paper QR logic: Use shortUrl if it's a rolling paper
+                        const isRollingPaper = l.messages && (typeof l.messages === 'string' ? JSON.parse(l.messages).length > 0 : l.messages.length > 0);
+                        if (isRollingPaper && l.shortUrl) {
+                            url = l.shortUrl;
+                        }
+
                         urls[l.id] = await QRCode.toDataURL(url, { margin: 1 });
                     }
                     setQrUrls(urls);

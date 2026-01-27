@@ -333,6 +333,7 @@
 
                 let finalUrl = '';
                 let finalMultiResults = [];
+                let finalData = null;
 
                 if (mode === 'general') {
                     if (!form.receiverName || !form.content) return alert('받는사람과 내용을 입력해주세요.');
@@ -352,7 +353,7 @@
                         mailbox.push('inbox');
                     }
 
-                    const finalData = { ...finalForm, id, mailbox, date: new Date().toLocaleDateString() };
+                    finalData = { ...finalForm, id, mailbox, date: new Date().toLocaleDateString() };
                     await window.LetterDB.save(finalData);
                     finalUrl = window.LetterDB.toUrl(finalData, 'view.html');
 
@@ -398,7 +399,7 @@
                                 date: new Date().toLocaleDateString()
                             };
                             const id = await window.LetterDB.generateID(rollingData);
-                            const finalData = { ...rollingData, id };
+                            finalData = { ...rollingData, id };
                             await window.LetterDB.save(finalData);
                             const url = window.LetterDB.toUrl(finalData, 'view.html');
                             newResults.push({ name: group.name, url });
@@ -420,7 +421,7 @@
                         };
 
                         const id = await window.LetterDB.generateID(rollingData);
-                        const finalData = { ...rollingData, id, mailbox: ['sent'], date: new Date().toLocaleDateString() };
+                        finalData = { ...rollingData, id, mailbox: ['sent'], date: new Date().toLocaleDateString() };
                         await window.LetterDB.save(finalData);
                         finalUrl = window.LetterDB.toUrl(finalData, 'view.html');
                     }

@@ -446,26 +446,54 @@
                 }
             };
 
-            const shortenUrl = async (url) => {
+            const generateRandomString = (length) => {
+                const chars = 'abcdefghijklmnopqrstuvwxyz';
+                let result = '';
+                for (let i = 0; i < length; i++) {
+                    result += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return result;
+            };
+
+            const shortenUrl = async (url, retryCount = 0) => {
                 if (!url) return null;
 
-                // Handle localhost URLs by mocking (is.gd doesn't support local IPs)
+                // Handle localhost URLs by mocking
                 if (url.includes('localhost') || url.includes('127.0.0.1')) {
-                    const mock = `https://is.gd/mock_${Math.floor(Math.random() * 100000)}`;
+                    const mock = `https://is.gd/M2U${generateRandomString(4)}`;
                     setResultUrl(mock);
                     if (window._qrFailed) generateQR(mock, true);
                     return mock;
                 }
 
+                const customName = `M2U${generateRandomString(3 + retryCount)}`; // Increase length on retry
+
                 return new Promise((resolve) => {
                     const callbackName = 'isgd_callback_' + Math.floor(Math.random() * 1000000);
-                    window[callbackName] = (data) => {
+                    window[callbackName] = async (data) => {
                         delete window[callbackName];
-                        document.body.removeChild(script);
+                        const script = document.getElementById(callbackName);
+                        if (script) document.body.removeChild(script);
+
                         if (data.shorturl) {
                             setResultUrl(data.shorturl);
                             if (window._qrFailed) generateQR(data.shorturl, true);
+
+                            // Save short URL back to DB record
+                            if (form.id) {
+                                try {
+                                    const currentLetter = await window.LetterDB.get(form.id);
+                                    if (currentLetter) {
+                                        await window.LetterDB.save({ ...currentLetter, shortUrl: data.shorturl });
+                                    }
+                                } catch (e) { console.error("Failed to save shortUrl to DB", e); }
+                            }
+
                             resolve(data.shorturl);
+                        } else if (data.errorcode === 1 && retryCount < 5) {
+                            // Error code 1 usually means short URL is already taken
+                            console.warn(`Short URL collision for ${customName}, retrying...`);
+                            resolve(await shortenUrl(url, retryCount + 1));
                         } else {
                             console.error("Shorten Error:", data.errormessage || data.errorcode);
                             setResultUrl('FAILED');
@@ -474,10 +502,11 @@
                     };
 
                     const script = document.createElement('script');
-                    script.src = `https://is.gd/create.php?format=json&callback=${callbackName}&url=${encodeURIComponent(url)}`;
+                    script.id = callbackName;
+                    script.src = `https://is.gd/create.php?format=json&callback=${callbackName}&url=${encodeURIComponent(url)}&shorturl=${customName}`;
                     script.onerror = () => {
                         delete window[callbackName];
-                        document.body.removeChild(script);
+                        if (script.parentNode) document.body.removeChild(script);
                         setResultUrl('FAILED');
                         resolve(null);
                     };
@@ -491,7 +520,7 @@
                             setResultUrl('FAILED');
                             resolve(null);
                         }
-                    }, 5000);
+                    }, 8000);
                 });
             };
 

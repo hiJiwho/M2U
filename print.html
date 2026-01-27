@@ -126,16 +126,16 @@
             };
 
             const imgStyle = bwMode ? {
-                width: '60%', borderRadius: 8, marginBottom: 12, border: '4px solid black'
+                width: '50%', borderRadius: 8, marginBottom: 12, border: '4px solid black', background: 'white'
             } : {
-                width: '60%', borderRadius: 8, marginBottom: 12, border: '4px solid white'
+                width: '50%', borderRadius: 8, marginBottom: 12, border: '4px solid white', background: 'white'
             };
 
             return (
                 <div style={{
                     width: '100%', height: '100%', boxSizing: 'border-box',
                     display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                    padding: '10%', ...outerStyle
+                    padding: '8%', ...outerStyle
                 }}>
                     <div style={{
                         width: '100%', height: '100%', borderRadius: 16,
@@ -143,11 +143,24 @@
                         padding: 16, textAlign: 'center',
                         ...innerStyle
                     }}>
-                        <img src={qrUrl} style={imgStyle} />
-                        <Typography variant="body2" style={{ fontSize: '0.8rem', opacity: 0.9 }}>
-                            카메라로 QR코드를 스캔하여<br />편지를 확인하세요!
+                        <Typography variant="h6" style={{ fontWeight: 700, marginBottom: 16, fontSize: '1.2rem' }}>
+                            QR을 스캔하세요
                         </Typography>
-                        <Typography variant="caption" style={{ marginTop: 8, opacity: 0.7 }}>From {data.senderName}</Typography>
+
+                        <img src={qrUrl} style={imgStyle} />
+
+                        <Box sx={{ mt: 1, width: '100%', px: 2 }}>
+                            <Typography variant="body2" style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                제목: {data.subject}
+                            </Typography>
+                            <Typography variant="caption" style={{ display: 'block', opacity: 0.9 }}>
+                                보낸 이: {data.senderName}
+                            </Typography>
+                        </Box>
+
+                        <Typography variant="caption" style={{ marginTop: 12, opacity: 0.8, fontStyle: 'italic', wordBreak: 'break-all' }}>
+                            {data.shortUrl || 'is.gd/M2U...'}
+                        </Typography>
                     </div>
                 </div>
             );

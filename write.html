@@ -479,9 +479,10 @@
                             setResultUrl(data.shorturl);
                             if (window._qrFailed) generateQR(data.shorturl, true);
 
-                            // Save short URL back to DB record
+                            // Update Form State and Save short URL back to DB record
                             if (form.id) {
                                 try {
+                                    setForm(prev => ({ ...prev, shortUrl: data.shorturl }));
                                     const currentLetter = await window.LetterDB.get(form.id);
                                     if (currentLetter) {
                                         await window.LetterDB.save({ ...currentLetter, shortUrl: data.shorturl });

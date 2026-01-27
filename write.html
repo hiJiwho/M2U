@@ -168,11 +168,11 @@
 
             // Auto Save to DB on Change (Instant Draft)
             useEffect(() => {
-                if (form.id && (form.subject || form.content)) {
+                if (form.id && (form.subject || form.content || form.receiverName || form.senderName)) {
                     // Save draft silently
                     const draftData = {
                         ...form,
-                        mailbox: 'draft',
+                        mailbox: ['draft'],
                         updatedAt: new Date().toISOString()
                         // Note: Password remains raw in draft for easy editing
                     };
@@ -448,24 +448,51 @@
 
             const shortenUrl = async (url) => {
                 if (!url) return null;
-                try {
-                    // Use local proxy to bypass CORS
-                    const res = await fetch(`/shorten?url=${encodeURIComponent(url)}`);
-                    if (res.ok) {
-                        const short = await res.text();
-                        setResultUrl(short);
-                        // If original QR failed, retry with short URL
-                        if (window._qrFailed) {
-                            generateQR(short, true);
-                        }
-                        return short;
-                    }
-                } catch (e) {
-                    console.error("Shorten Failed", e);
+
+                // Handle localhost URLs by mocking (is.gd doesn't support local IPs)
+                if (url.includes('localhost') || url.includes('127.0.0.1')) {
+                    const mock = `https://is.gd/mock_${Math.floor(Math.random() * 100000)}`;
+                    setResultUrl(mock);
+                    if (window._qrFailed) generateQR(mock, true);
+                    return mock;
                 }
-                // If it fails, we still have originUrl
-                setResultUrl('FAILED');
-                return null;
+
+                return new Promise((resolve) => {
+                    const callbackName = 'isgd_callback_' + Math.floor(Math.random() * 1000000);
+                    window[callbackName] = (data) => {
+                        delete window[callbackName];
+                        document.body.removeChild(script);
+                        if (data.shorturl) {
+                            setResultUrl(data.shorturl);
+                            if (window._qrFailed) generateQR(data.shorturl, true);
+                            resolve(data.shorturl);
+                        } else {
+                            console.error("Shorten Error:", data.errormessage || data.errorcode);
+                            setResultUrl('FAILED');
+                            resolve(null);
+                        }
+                    };
+
+                    const script = document.createElement('script');
+                    script.src = `https://is.gd/create.php?format=json&callback=${callbackName}&url=${encodeURIComponent(url)}`;
+                    script.onerror = () => {
+                        delete window[callbackName];
+                        document.body.removeChild(script);
+                        setResultUrl('FAILED');
+                        resolve(null);
+                    };
+                    document.body.appendChild(script);
+
+                    // Timeout handling
+                    setTimeout(() => {
+                        if (window[callbackName]) {
+                            delete window[callbackName];
+                            if (script.parentNode) document.body.removeChild(script);
+                            setResultUrl('FAILED');
+                            resolve(null);
+                        }
+                    }, 5000);
+                });
             };
 
             const generateQR = (url, isFallback = false) => {

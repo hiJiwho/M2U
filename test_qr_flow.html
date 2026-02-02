@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Test Print Logic</title>
+    <script src="./db.js"></script>
+</head>
+
+<body>
+    <h1>Test QR Fallback</h1>
+    <button onclick="setupNormal()">Setup Normal Letter (Small URL)</button>
+    <button onclick="setupLong()">Setup Long Letter (Triggers Fallback)</button>
+    <button onclick="window.open('print.html', '_blank')">Open Print View</button>
+
+    <script>
+        async function setupNormal() {
+            const id = "test_normal_" + Date.now();
+            const letter = {
+                id: id,
+                subject: "Normal Letter",
+                senderName: "Tester",
+                receiverName: "User",
+                content: "Short content",
+                date: "2024-01-01",
+                mailbox: ['sent'],
+                theme: 'm3_purple'
+            };
+            await window.LetterDB.save(letter);
+            localStorage.setItem('mail2u_print_queue', JSON.stringify([id]));
+            alert("Normal letter setup. Click 'Open Print View'.");
+        }
+
+        async function setupLong() {
+            const id = "test_long_" + Date.now();
+            const letter = {
+                id: id,
+                subject: "Long Letter",
+                senderName: "Tester",
+                receiverName: "User",
+                content: "A".repeat(2000), // Very long content to make URL huge
+                date: "2024-01-01",
+                mailbox: ['sent'],
+                theme: 'mint'
+            };
+            await window.LetterDB.save(letter);
+            localStorage.setItem('mail2u_print_queue', JSON.stringify([id]));
+            alert("Long letter setup. Click 'Open Print View'. Look at console logs for 'Trying shortener...'");
+        }
+    </script>
+</body>
+
+</html>

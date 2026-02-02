@@ -74,7 +74,15 @@
 
         // Card Styles
         const CardFront = ({ data, width, height, bwMode }) => {
-            const themeColor = { indigo: '#6750A4', purple: '#9c27b0', teal: '#00695f', pink: '#b91d47', orange: '#d84e09', blueGrey: '#52667a' }[data.theme] || '#6750A4';
+            const themeColor = {
+                m3_purple: '#6750A4',
+                mint: '#008272',
+                berry: '#0067C0',
+                candy: '#E3008C',
+                forest: '#004E4C',
+                pumpkin: '#D83B01',
+                zinc: '#505050'
+            }[data.theme] || '#6750A4';
 
             const outerStyle = bwMode ? {
                 border: '1px dashed #000', background: 'white'
@@ -111,7 +119,15 @@
         };
 
         const CardBack = ({ data, width, height, qrUrl, bwMode }) => {
-            const themeColor = { indigo: '#6750A4', purple: '#9c27b0', teal: '#00695f', pink: '#b91d47', orange: '#d84e09', blueGrey: '#52667a' }[data.theme] || '#6750A4';
+            const themeColor = {
+                m3_purple: '#6750A4',
+                mint: '#008272',
+                berry: '#0067C0',
+                candy: '#E3008C',
+                forest: '#004E4C',
+                pumpkin: '#D83B01',
+                zinc: '#505050'
+            }[data.theme] || '#6750A4';
 
             const outerStyle = bwMode ? {
                 border: '1px dashed #000', background: 'white'
@@ -119,16 +135,10 @@
                 border: '1px dashed #CCC', background: 'white'
             };
 
-            const innerStyle = bwMode ? {
-                background: 'white', border: '2px solid black', color: 'black'
-            } : {
-                background: themeColor, color: 'white',
-            };
-
-            const imgStyle = bwMode ? {
-                width: '45%', borderRadius: 8, marginBottom: 8, border: '4px solid black', background: 'white'
-            } : {
-                width: '45%', borderRadius: 8, marginBottom: 8, border: '4px solid white', background: 'white'
+            const innerStyle = {
+                background: bwMode ? 'white' : themeColor,
+                border: bwMode ? '2px solid black' : 'none',
+                color: bwMode ? 'black' : 'white'
             };
 
             return (
@@ -139,10 +149,9 @@
                 }}>
                     <div style={{
                         width: '100%', height: '100%', borderRadius: 16,
-                        display: 'grid', gridTemplateRows: 'auto 1fr auto auto',
-                        alignItems: 'center', justifyItems: 'center',
+                        display: 'flex', flexDirection: 'column',
+                        alignItems: 'center', justifyContent: 'center',
                         padding: '16px 12px', textAlign: 'center',
-                        gap: '4px',
                         ...innerStyle
                     }}>
                         <Typography variant="h6" style={{ fontWeight: 700, fontSize: '1rem', whiteSpace: 'nowrap' }}>
@@ -151,27 +160,30 @@
 
                         <div style={{
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            height: '100%', width: '100%', minHeight: 0, overflow: 'hidden'
+                            height: '100%', width: '100%', minHeight: 0, overflow: 'hidden',
+                            margin: '8px 0'
                         }}>
                             <img src={qrUrl} style={{
-                                maxHeight: '100%', maxWidth: '85%', objectFit: 'contain',
+                                maxHeight: '100%', maxWidth: '95%', objectFit: 'contain',
                                 borderRadius: 8, border: bwMode ? '4px solid black' : '4px solid white',
                                 background: 'white', boxSizing: 'border-box'
                             }} />
                         </div>
 
                         <Box sx={{ width: '100%', px: 1 }}>
-                            <Typography variant="body2" style={{ fontWeight: 600, fontSize: '0.8rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            <Typography variant="body2" style={{ fontWeight: 600, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                                 제목: {data.subject}
                             </Typography>
-                            <Typography variant="caption" style={{ display: 'block', fontSize: '0.7rem', opacity: 0.9 }}>
+                            <Typography variant="caption" style={{ display: 'block', fontSize: '0.8rem', opacity: 0.9 }}>
                                 보낸 이: {data.senderName}
                             </Typography>
                         </Box>
 
                         <Typography variant="caption" style={{
-                            fontSize: '0.6rem', opacity: 0.8, fontStyle: 'italic',
-                            wordBreak: 'break-all', lineHeight: 1, marginTop: 4
+                            fontSize: '0.85rem', opacity: 1, fontWeight: 700,
+                            wordBreak: 'break-all', lineHeight: 1.2, marginTop: 8,
+                            padding: '4px 8px', borderRadius: 4,
+                            background: bwMode ? 'rgba(0,0,0,0.1)' : 'rgba(255,255,255,0.2)'
                         }}>
                             {data._displayUrl || data.shortUrl || 'is.gd/M2U...'}
                         </Typography>

@@ -173,7 +173,7 @@
                             fontSize: '0.6rem', opacity: 0.8, fontStyle: 'italic',
                             wordBreak: 'break-all', lineHeight: 1, marginTop: 4
                         }}>
-                            {data.shortUrl || 'is.gd/M2U...'}
+                            {data._displayUrl || data.shortUrl || 'is.gd/M2U...'}
                         </Typography>
                     </div>
                 </div>
@@ -211,35 +211,79 @@
                             return;
                         }
 
+                        // Helper: Shorten URL using is.gd
+                        const shortenUrl = async (longUrl) => {
+                            try {
+                                const response = await fetch(`https://is.gd/create.php?format=json&url=${encodeURIComponent(longUrl)}`);
+                                const data = await response.json();
+                                if (data.shorturl) return data.shorturl;
+                                throw new Error(data.errormessage || "Unknown error");
+                            } catch (e) {
+                                console.error("IS.GD Shorten Error:", e);
+                                return null;
+                            }
+                        };
+
                         const urls = {};
                         for (const l of targets) {
+                            let url = window.LetterDB.toUrl(l, 'view.html');
+                            let displayUrl = l.shortUrl || 'is.gd/M2U...'; // Default display
+
+                            // Apply rolling paper QR logic
+                            let isRollingPaper = false;
                             try {
-                                let url = window.LetterDB.toUrl(l, 'view.html');
-
-                                // Apply rolling paper QR logic: Use shortUrl if it's a rolling paper
-                                let isRollingPaper = false;
-                                try {
-                                    if (l.messages) {
-                                        isRollingPaper = typeof l.messages === 'string'
-                                            ? JSON.parse(l.messages).length > 0
-                                            : l.messages.length > 0;
-                                    }
-                                } catch (e) {
-                                    console.warn("Failed to parse messages for letter", l.id, e);
-                                    // Treat as not rolling paper if parse fails
+                                if (l.messages) {
+                                    isRollingPaper = typeof l.messages === 'string'
+                                        ? JSON.parse(l.messages).length > 0
+                                        : l.messages.length > 0;
                                 }
-
-                                if (isRollingPaper && l.shortUrl) {
-                                    url = l.shortUrl;
-                                }
-
-                                urls[l.id] = await QRCode.toDataURL(url, { margin: 1 });
-                            } catch (err) {
-                                console.error("Failed to generate QR for letter", l.id, err);
-                                // Optional: Set a placeholder or error image?
-                                // urls[l.id] = ""; 
+                            } catch (e) {
+                                console.warn("Failed to parse messages for letter", l.id, e);
                             }
+
+                            if (isRollingPaper && l.shortUrl) {
+                                url = l.shortUrl;
+                            }
+
+                            // Try Generating QR
+                            try {
+                                if (url.length > 300) {
+                                    // 1. URL > 300: Always use shortener for better scanning
+                                    console.log(`URL length (${url.length}) > 300. Shortening...`);
+                                    const short = await shortenUrl(url);
+                                    if (short) {
+                                        urls[l.id] = await QRCode.toDataURL(short, { margin: 1, errorCorrectionLevel: 'M' });
+                                        l._displayUrl = short.replace('https://', '');
+                                    } else {
+                                        throw new Error("Shortening failed");
+                                    }
+                                } else {
+                                    // 2. URL <= 300: Use Original
+                                    urls[l.id] = await QRCode.toDataURL(url, { margin: 1, errorCorrectionLevel: 'M' });
+                                }
+                            } catch (err) {
+                                console.warn(`QR Gen failed for ${l.id} (Length: ${url.length}). Trying fallback...`, err);
+                                if (url.length <= 300) {
+                                    // If it failed locally but wasn't shortened yet, try shortening now
+                                    const short = await shortenUrl(url);
+                                    if (short) {
+                                        try {
+                                            urls[l.id] = await QRCode.toDataURL(short, { margin: 1, errorCorrectionLevel: 'M' });
+                                            l._displayUrl = short.replace('https://', '');
+                                        } catch (e2) {
+                                            console.error(`Final fallback failed for ${l.id}`, e2);
+                                        }
+                                    }
+                                }
+                            }
+
+                            // If l._displayUrl exists, we should use it in the component.
+                            // However, React state 'letters' is already set. We might need to force update or setLetters again?
+                            // Better: Update 'letters' state after processing all QRs if we want to show the new URL text.
                         }
+
+                        // Re-set letters to trigger update with _displayUrl if any
+                        setLetters([...targets]);
                         setQrUrls(urls);
                     } catch (e) {
                         console.error("Global error in load effect:", e);

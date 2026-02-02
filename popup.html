@@ -209,54 +209,70 @@
 
             let data = null;
 
-            if (hasParams) {
-                // 1. From URL
-                data = window.LetterDB.fromUrl();
-                if (data) {
-                    // 2. Auto-save (if not exists)
-                    const exists = await window.LetterDB.exists(data.id);
-                    if (!exists) {
-                        // New Inbox Item
-                        await window.LetterDB.save({ ...data, mailbox: ['inbox'], savedAt: new Date().toISOString() });
-                    } else {
-                        // Exists (Self-Send Case): Add 'inbox' tag if needed
-                        const existing = await window.LetterDB.get(data.id);
-                        if (existing) {
-                            let mbox = existing.mailbox;
-                            if (!Array.isArray(mbox)) mbox = [mbox]; // Normalize
-                            if (!mbox.includes('inbox')) {
-                                mbox.push('inbox');
-                                await window.LetterDB.save({ ...existing, mailbox: mbox });
+            try {
+                if (hasParams) {
+                    // 1. From URL
+                    data = window.LetterDB.fromUrl();
+                    if (data) {
+                        // Validation
+                        // Logic shared with view.html, but implemented inline or helper fn?
+                        // Implementing inline for now to avoid dependency on updated utils if not moved there.
+                        const isRolling = data.messages && (typeof data.messages === 'string' ? data.messages.length > 2 : data.messages.length > 0);
+                        if (!isRolling && !data.senderName) {
+                            alert("URL이 완성되지 않았습니다. 보낸 사람께 문의 바랍니다.");
+                            window.close();
+                            return;
+                        }
+
+                        // 2. Auto-save (if not exists)
+                        const exists = await window.LetterDB.exists(data.id);
+                        if (!exists) {
+                            // New Inbox Item
+                            await window.LetterDB.save({ ...data, mailbox: ['inbox'], savedAt: new Date().toISOString() });
+                        } else {
+                            // Exists (Self-Send Case): Add 'inbox' tag if needed
+                            const existing = await window.LetterDB.get(data.id);
+                            if (existing) {
+                                let mbox = existing.mailbox;
+                                if (!Array.isArray(mbox)) mbox = [mbox]; // Normalize
+                                if (!mbox.includes('inbox')) {
+                                    mbox.push('inbox');
+                                    await window.LetterDB.save({ ...existing, mailbox: mbox });
+                                }
                             }
                         }
                     }
-                }
 
-                // 3. Session Save
-                sessionStorage.setItem('current_popup_letter', JSON.stringify(data));
+                    // 3. Session Save
+                    sessionStorage.setItem('current_popup_letter', JSON.stringify(data));
 
-                // 4. URL Clean
-                window.history.replaceState({}, document.title, window.location.pathname);
-            } else {
-                // 1. From Session
-                const sessionStr = sessionStorage.getItem('current_popup_letter');
-                if (sessionStr) {
-                    data = JSON.parse(sessionStr);
+                    // 4. URL Clean
+                    window.history.replaceState({}, document.title, window.location.pathname);
                 } else {
-                    // Check Opener? (Optional)
-                    try {
-                        if (window.opener && window.opener.sessionStorage) {
-                            const openerSession = window.opener.sessionStorage.getItem('current_letter');
-                            if (openerSession) data = JSON.parse(openerSession);
-                        }
-                    } catch (e) { }
+                    // 1. From Session
+                    const sessionStr = sessionStorage.getItem('current_popup_letter');
+                    if (sessionStr) {
+                        data = JSON.parse(sessionStr);
+                    } else {
+                        // Check Opener? (Optional)
+                        try {
+                            if (window.opener && window.opener.sessionStorage) {
+                                const openerSession = window.opener.sessionStorage.getItem('current_letter');
+                                if (openerSession) data = JSON.parse(openerSession);
+                            }
+                        } catch (e) { }
 
-                    if (!data) {
-                        alert('잘못된 접근입니다.');
-                        window.close();
-                        return;
+                        if (!data) {
+                            alert('잘못된 접근입니다.');
+                            window.close();
+                            return;
+                        }
                     }
                 }
+            } catch (e) {
+                console.error("Critical Error during popup init:", e);
+                alert("편지 로딩중 오류가 발생했습니다. 다음 로그를 참고해주세요\n" + e.message);
+                return;
             }
 
             if (data) {
@@ -336,6 +352,12 @@
                     document.getElementById('letter-sender').innerText = `보낸이: ${data.senderName} ${data.senderRole}`;
                 } else {
                     document.getElementById('letter-sender').innerText = data.senderName ? `보낸이: ${data.senderName}` : `롤링페이퍼 (${JSON.parse(data.messages).length}명)`;
+                }
+
+                // Auto-print if mode=print
+                if (params.get('mode') === 'print') {
+                    // Small delay to ensure rendering is complete
+                    setTimeout(() => window.print(), 800);
                 }
             }
         })();

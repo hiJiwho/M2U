@@ -63,45 +63,99 @@
 
             useEffect(() => {
                 const init = async () => {
-                    const params = new URLSearchParams(window.location.search);
-                    const hasParams = params.has('subject') || params.has('content');
+                    try {
+                        const params = new URLSearchParams(window.location.search);
+                        const hasParams = params.has('subject') || params.has('content');
 
-                    let d = null;
+                        let d = null;
 
-                    if (hasParams) {
-                        d = window.LetterDB.fromUrl();
-                        if (d) {
-                            // Only save to inbox if it doesn't already exist to avoid duplicate entries for sent letters
-                            const exists = await window.LetterDB.exists(d.id);
-                            if (!exists) {
-                                await window.LetterDB.save({ ...d, mailbox: 'inbox', savedAt: new Date().toISOString() });
+                        if (hasParams) {
+                            d = window.LetterDB.fromUrl();
+                            if (d) {
+                                // Validation
+                                const errorMsg = validateData(d);
+                                if (errorMsg) {
+                                    alert(errorMsg);
+                                    window.location.href = 'index.html'; // Or stay to show error? Stay may be better but 'no data' state needs handling.
+                                    return;
+                                }
+
+                                // Only save to inbox if it doesn't already exist to avoid duplicate entries for sent letters
+                                const exists = await window.LetterDB.exists(d.id);
+                                if (!exists) {
+                                    await window.LetterDB.save({ ...d, mailbox: 'inbox', savedAt: new Date().toISOString() });
+                                }
+                                sessionStorage.setItem('current_letter', JSON.stringify(d));
+                                const cleanUrl = window.location.pathname;
+                                window.history.replaceState({}, document.title, cleanUrl);
                             }
-                            sessionStorage.setItem('current_letter', JSON.stringify(d));
-                            const cleanUrl = window.location.pathname;
-                            window.history.replaceState({}, document.title, cleanUrl);
-                        }
-                    } else {
-                        const sessionData = sessionStorage.getItem('current_letter');
-                        if (sessionData) {
-                            d = JSON.parse(sessionData);
                         } else {
-                            alert('유효하지 않은 접근입니다. 메인으로 이동합니다.');
-                            window.location.href = 'index.html';
-                            return;
+                            const sessionData = sessionStorage.getItem('current_letter');
+                            if (sessionData) {
+                                d = JSON.parse(sessionData);
+                            } else {
+                                alert('유효하지 않은 접근입니다. 메인으로 이동합니다.');
+                                window.location.href = 'index.html';
+                                return;
+                            }
                         }
-                    }
 
-                    if (d) {
-                        setData(d);
-                        if (d.passwordHash) {
-                            setIsLocked(true);
-                        } else {
-                            parseData(d);
+                        if (d) {
+                            // Re-validate session data just in case
+                            const errorMsg = validateData(d);
+                            if (errorMsg) {
+                                alert(errorMsg);
+                                return;
+                            }
+
+                            setData(d);
+                            if (d.passwordHash) {
+                                setIsLocked(true);
+                            } else {
+                                parseData(d);
+                            }
                         }
+                    } catch (e) {
+                        console.error("Critical Error during init:", e);
+                        alert("편지 로딩중 오류가 발생했습니다. 다음 로그를 참고해주세요\n" + e.message);
                     }
                 };
                 init();
             }, []);
+
+            const validateData = (d) => {
+                // Check required fields
+                // Required: senderName (or messages for rolling paper), receiverName? (receiverName is used in header)
+                // User req: Sender Name, Sender Role, Phone, Email, File URL, Password ?
+                // "Did not have some string (W.O. Sender, sender's 역활, phone num, Email, file URL, Password)"
+                // This implies these fields CAN be empty but the URL structure itself might be malformed if keys are missing?
+                // The prompt says: "if that share URL Did not have some string... show error 'URL이 완성되지 않았습니다...'"
+                // It specifically mentions "W.O. Sender...". W.O likely means "WithOut"?
+                // Let's assume validation means checking if the essential data that makes the letter valid is present.
+                // The prompt lists: Sender, Role, Phone, Email, File, PW.
+                // But not all letters have all these. Maybe it means if the *URL param keys* are missing completely?
+                // window.LetterDB.fromUrl() returns keys with empty strings if missing.
+                // Re-reading: "URL params have keys but empty values?" -> No, `fromUrl` fills defaults.
+
+                // Let's interpret "URL이 완성되지 않았습니다" as generic "Required fields missing".
+                // What is absolutely required? SenderName is critical.
+
+                // Special case: Rolling paper (has messages), might not have single senderName.
+                const isRolling = d.messages && (typeof d.messages === 'string' ? d.messages.length > 2 : d.messages.length > 0);
+
+                if (!isRolling && !d.senderName) {
+                    return "URL이 완성되지 않았습니다. 보낸 사람께 문의 바랍니다.";
+                }
+
+                // The user listed "Sender, sender's 역활, phone num, Email, file URL, Password".
+                // It sounds like if ANY of these are corrupted or the URL truncated?
+                // But optional fields like phone/email can be empty.
+                // I'll assume SenderName is the primary check for "Completion". 
+                // If it's a specific "Template" that requires them, that's different.
+                // Given "M2U" context, only Sender/Receiver names are truly visible and needed.
+
+                return null;
+            };
 
             const parseData = (d) => {
                 if (window.VariableUtils) {
@@ -269,14 +323,43 @@
                                         <Typography variant="titleMedium" align="left" color="onSurface" sx={{ fontWeight: 500, fontSize: '1.2rem' }}>{data.subject || '제목 없음'}</Typography>
                                     </Paper>
 
-                                    <Button
-                                        variant="contained" size="large" disableElevation
-                                        fullWidth sx={{ height: 56, mb: 3, fontSize: '1rem' }}
-                                        onClick={openPopup}
-                                        startIcon={<span className="material-symbols-rounded">open_in_new</span>}
-                                    >
-                                        편지 열기
-                                    </Button>
+                                    <Stack spacing={1.5} sx={{ mb: 3 }}>
+                                        <Button
+                                            variant="contained" size="large" disableElevation
+                                            fullWidth sx={{ height: 56, fontSize: '1rem' }}
+                                            onClick={openPopup}
+                                            startIcon={<span className="material-symbols-rounded">open_in_new</span>}
+                                        >
+                                            편지 열기
+                                        </Button>
+
+                                        <Stack direction="row" spacing={1}>
+                                            <Button
+                                                variant="outlined"
+                                                fullWidth sx={{ height: 48 }}
+                                                onClick={async () => {
+                                                    const url = window.LetterDB.toUrl(data, 'view.html');
+                                                    try {
+                                                        await navigator.clipboard.writeText(url);
+                                                        alert('공유 링크가 클립보드에 복사되었습니다.');
+                                                    } catch (e) {
+                                                        alert('링크 복사에 실패했습니다.');
+                                                    }
+                                                }}
+                                                startIcon={<span className="material-symbols-rounded">content_copy</span>}
+                                            >
+                                                공유 링크 복사
+                                            </Button>
+                                            <Button
+                                                variant="outlined"
+                                                fullWidth sx={{ height: 48 }}
+                                                onClick={() => window.open(window.LetterDB.toUrl(data, 'popup.html') + '&mode=print', '_blank')}
+                                                startIcon={<span className="material-symbols-rounded">print</span>}
+                                            >
+                                                편지 인쇄
+                                            </Button>
+                                        </Stack>
+                                    </Stack>
 
                                     <Divider sx={{ my: 3 }} />
 
